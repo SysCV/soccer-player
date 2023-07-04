@@ -1,0 +1,16 @@
+[tool.black]
+line-length = 79
+
+[tool.pytest.ini_options]
+python_files = "*_test.py"
+
+[tool.isort]
+profile = "black"
+line_length = 79
+
+[tool.mypy]
+
+# Disallow using Any in the scalabel code
+disallow_any_explicit = true
+disallow_any_generics = true
+disallow_subclassing_any = true

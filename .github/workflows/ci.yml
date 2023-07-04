@@ -1,0 +1,61 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9]
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install --ignore-installed -r requirements.txt
+      - name: pylint
+        run: python3 -m pylint proj_vis
+      - name: docstype
+        run: python3 -m pydocstyle --convention=google proj_vis
+      - name: mypy
+        # You can comment this out if you use this repo for a student project
+        run: python3 -m mypy --strict proj_vis
+      - name: isort
+        # these errors can be fixed by python3 -m isort proj_vis
+        run: python3 -m isort -c proj_vis
+      - name: black
+        # these errors can be fixed by python3 -m black --check proj_vis
+        run: python3 -m black --check proj_vis
+
+  test:
+    # If you need to use ROS 1 or 2, you may need to change the ubuntu setting
+    name: test py${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.7, 3.8, 3.9]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install --ignore-installed -r requirements.txt
+      # - name: Build
+      #  run: python3 setup.py sdist bdist_wheel
+      - name: Test
+        run: python3 -m pytest --pyargs proj_vis
