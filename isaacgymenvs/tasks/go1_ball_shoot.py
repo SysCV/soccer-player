@@ -26,7 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# ======== Asset info unitree a1: ========
+# ======== Asset info unitree go1: ========
 # Got 17 bodies, 16 joints, and 12 DOFs
 # Bodies:
 #   0: 'base'
@@ -89,7 +89,7 @@ from isaacgym import gymutil
 from isaacgymenvs.tasks.base.vec_task import VecTask
 from isaacgymenvs.utils.torch_jit_utils import calc_heading
 
-from typing import Tuple, Dict
+from typing import Dict, Any, Tuple, List, Set
 
 
 class Go1BallShoot(VecTask):
@@ -112,10 +112,14 @@ class Go1BallShoot(VecTask):
         self.action_scale = self.cfg["env"]["control"]["actionScale"]
 
         # reward scales
-        self.rew_scales = {}
-        self.rew_scales["lin_vel_xy"] = self.cfg["env"]["learn"]["linearVelocityXYRewardScale"]
-        self.rew_scales["ang_vel_z"] = self.cfg["env"]["learn"]["angularVelocityZRewardScale"]
-        self.rew_scales["torque"] = self.cfg["env"]["learn"]["torqueRewardScale"]
+        self.reward_scales = self.cfg["env"]["rewards"]["rewardScales"]
+        self.reward_params = self.cfg["env"]["rewards"]["rewardParams"]
+
+        # TODO: out-dated!!!
+        # self.rew_scales = {}
+        # self.rew_scales["lin_vel_xy"] = self.cfg["env"]["learn"]["linearVelocityXYRewardScale"]
+        # self.rew_scales["ang_vel_z"] = self.cfg["env"]["learn"]["angularVelocityZRewardScale"]
+        # self.rew_scales["torque"] = self.cfg["env"]["learn"]["torqueRewardScale"]
 
         # randomization
         self.randomization_params = self.cfg["task"]["randomization_params"]
@@ -348,6 +352,12 @@ class Go1BallShoot(VecTask):
                 this_ball_props[0].rolling_friction = 0.1
                 this_ball_props[0].restitution = 0.9
                 self.gym.set_actor_rigid_shape_properties(env_ptr, ball_handle, this_ball_props)
+
+                # this_ball_phy_props = self.gym.get_actor_rigid_body_properties(env_ptr, ball_handle)
+                # this_ball_phy_props[0].mass = 0.45
+                # self.gym.set_actor_rigid_body_properties(env_ptr, ball_handle, this_ball_phy_props)
+
+
                 self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color)
                 self.ball_handles.append(ball_handle)
 
@@ -397,17 +407,70 @@ class Go1BallShoot(VecTask):
         targets = self.action_scale * self.actions + self.default_dof_pos
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
 
+
+    def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """Step the physics of the environment.
+
+        Args:
+            actions: actions to apply
+        Returns:
+            Observations, rewards, resets, info
+            Observations are dict of observations (currently only one member called 'obs')
+        """
+
+        # randomize actions
+        if self.dr_randomizations.get('actions', None):
+            actions = self.dr_randomizations['actions']['noise_lambda'](actions)
+
+        action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
+        # apply actions
+        self.pre_physics_step(action_tensor)
+
+        # step physics and render each frame
+        for i in range(self.control_freq_inv):
+            if self.force_render:
+                self.render()
+            self.gym.simulate(self.sim)
+
+        # to fix!
+        if self.device == 'cpu':
+            self.gym.fetch_results(self.sim, True)
+
+        # compute observations, rewards, resets, ...
+        self.post_physics_step()
+
+        self.control_steps += 1
+
+        # fill time out buffer: set to 1 if we reached the max episode length AND the reset buffer is 1. Timeout == 1 makes sense only if the reset buffer is 1.
+        self.timeout_buf = (self.progress_buf >= self.max_episode_length - 1) & (self.reset_buf != 0)
+
+        # randomize observations
+        if self.dr_randomizations.get('observations', None):
+            self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](self.obs_buf)
+
+        self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
+
+        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        # asymmetric actor-critic
+        if self.num_states > 0:
+            self.obs_dict["states"] = self.get_state()
+
+        return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
+
     def post_physics_step(self):
         self.progress_buf += 1
 
-        # process termination states
-        self.count_extra_length()
-
+        # the reset is from the previous step
+        # because we need the observation of 0 step, if compute_reset -> reset, we will lose the observation of 0 step
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1) # env_ides is [id1 id2 ...]
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
 
+        self.refresh_self_buffers()
+
         self.compute_observations()
+        self.compute_reset()
         self.compute_reward(self.actions)
 
         if self.save_cam:
@@ -437,35 +500,68 @@ class Go1BallShoot(VecTask):
                     # print(self.root_states.get_device())
             self.gym.end_access_image_tensors(self.sim)
 
-    def count_extra_length(self):
+    def refresh_self_buffers(self):
+        # refresh
+        self.gym.refresh_dof_state_tensor(self.sim)
+        self.gym.refresh_actor_root_state_tensor(self.sim)
+        self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_dof_force_tensor(self.sim)
+
+        # raw data
+        
+
+        # state data
+        self.base_quat = self.root_states[::3, 3:7]
+        self.base_pos = self.root_states[::3, 0:3]
+        self.ball_pos = self.root_states[1::3, 0:3]
+        self.goal_pos = self.root_states[2::3, 0:3]
+        self.ball_lin_vel_xy_world = self.root_states[1::3, 7:9]
+
+        #judgement data
         is_onground = torch.norm(self.contact_forces[:, self.ball_index, :], dim=1) > 0.1
         self.onground_length[is_onground] += 1
         is_stable = ~(torch.any(self.root_states[1::3, 7:9]> 0.2, dim=1))
         self.stable_length[is_stable] += 1
+        self.ball_in_goal_now = (torch.sum(torch.square(self.ball_pos - self.goal_pos), dim=1) < 0.05)
+
+
+    def compute_reward_prev(self):
+        """ Compute rewards
+            Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
+            adds each terms to the episode sums and to the total reward
+        """
+        extra_info = {}
+        episode_cumulative = {}
+        self.rew_buf[:] = 0.
+        for i in range(len(self.reward_functions)):
+            name = self.reward_names[i]
+            rew = self.reward_functions[i]() * self.reward_scales[name]
+            self.rew_buf += rew
+            episode_cumulative[name] = rew
+        
+        extra_info["episode_cumulative"] = episode_cumulative
+        self.extras.update(extra_info)
+
 
     def compute_reward(self, actions):
-        base_quat = self.root_states[::3, 3:7]
-        base_pos = self.root_states[::3, 0:3]
-        ball_pos = self.root_states[1::3, 0:3]
-        goal_pos = self.root_states[2::3, 0:3]
-        ball_lin_vel_xy_world = self.root_states[1::3, 7:9]
+
         extra_info = {}
 
-        ball_goal_distance_error = torch.sum(torch.square(ball_pos - goal_pos), dim=1)
-        ball_in_goal = (ball_goal_distance_error < 0.05)
+        ball_goal_distance_error = torch.sum(torch.square(self.ball_pos - self.goal_pos), dim=1)
 
-        reward_ball_in_goal = torch.zeros_like(ball_in_goal, dtype=torch.float, device=ball_in_goal.device)
-        reward_ball_in_goal[ball_in_goal] = 1000.
+
+        reward_ball_in_goal = torch.zeros_like(self.ball_in_goal_now, dtype=torch.float, device=self.ball_in_goal_now.device)
+        reward_ball_in_goal[self.ball_in_goal_now] = 1000.
 
         rew_distance = 10 * torch.exp(-ball_goal_distance_error)
 
-        ball_dog_distance_error = torch.sum(torch.square(ball_pos - base_pos), dim=1)
+        ball_dog_distance_error = torch.sum(torch.square(self.ball_pos - self.base_pos), dim=1)
         ball_dog_distance_error = torch.clamp_min(ball_dog_distance_error, 0.5)
         rew_ball_dog_distance = 2 * torch.exp(-ball_dog_distance_error)
 
-        robot_heading = torch.tensor([[1., 0., 0.]] * base_pos.size(0), device=self.root_states.device)
-        base_quat_world = quat_rotate(base_quat, robot_heading)
-        base_to_ball_world = ball_pos - base_pos
+        robot_heading = torch.tensor([[1., 0., 0.]] * self.base_pos.size(0), device=self.root_states.device)
+        base_quat_world = quat_rotate(self.base_quat, robot_heading)
+        base_to_ball_world = self.ball_pos - self.base_pos
         base_quat_world_xy = base_quat_world[:, :3]
         base_to_ball_world_xy = base_to_ball_world[:, :3]
         base_quat_world_xy = base_quat_world_xy / torch.norm(base_quat_world_xy, dim=1, keepdim=True)
@@ -473,14 +569,14 @@ class Go1BallShoot(VecTask):
         dot_product = torch.sum(base_quat_world_xy * base_to_ball_world_xy, dim=1)
         heading_reward = torch.exp(dot_product) / 200.
 
-        speed_error = torch.sum(torch.square(ball_lin_vel_xy_world - self.commands), dim=1)
+        speed_error = torch.sum(torch.square(self.ball_lin_vel_xy_world - self.commands), dim=1)
         rew_ball_speed = torch.exp(-speed_error)
 
-        ball_z = ball_pos[:, 2]
+        ball_z = self.ball_pos[:, 2]
         ball_z_reward = torch.exp(ball_z) / 4.
 
 
-        ball_speed_square = torch.sum(torch.square(ball_lin_vel_xy_world), dim=1)
+        ball_speed_square = torch.sum(torch.square(self.ball_lin_vel_xy_world), dim=1)
         command_speed_square = torch.sum(torch.square(self.commands), dim=1)
         rew_have_speed = torch.tanh(torch.clamp_max(ball_speed_square, command_speed_square))
 
@@ -499,33 +595,35 @@ class Go1BallShoot(VecTask):
 
         total_reward = torch.clip(total_reward, 0., None)
 
+
+        # ball_in_goal_count = torch.sum(self.ball_in_goal_now.int()).item()
+        # total_count = torch.sum(reset.int()).item()
+
+        # self.totall_episode += total_count
+        # self.success_episode += ball_in_goal_count
+
+        # extra_info["total_episode_this_epoch"] = total_count
+        # extra_info["succeed_episode_this_epoch"] = ball_in_goal_count
+
+        self.rew_buf[:] = total_reward.detach()
+        self.extras.update(extra_info)
+
+    def compute_reset(self):
         reset = torch.norm(self.contact_forces[:, self.base_index, :], dim=1) > 1.
         reset = reset | torch.any(torch.norm(self.contact_forces[:, self.knee_indices, :], dim=2) > 1., dim=1)
-        reset = reset | (ball_pos[:, 0] - goal_pos[:, 0] > .1)
-        reset = reset | ball_in_goal
+
+        reset = reset | (self.ball_pos[:, 0] - self.goal_pos[:, 0] > .1)
+        reset = reset | self.ball_in_goal_now
 
         time_out = self.progress_buf >= self.max_episode_length - 1
         onground_time_out = self.onground_length >= self.max_onground_length - 1
         stable_time_out = self.stable_length >= self.max_stable_length - 1
         reset = reset | time_out | onground_time_out | stable_time_out
-
-        ball_in_goal_count = torch.sum(ball_in_goal.int()).item()
-        total_count = torch.sum(reset.int()).item()
-
-        self.totall_episode += total_count
-        self.success_episode += ball_in_goal_count
-
-        extra_info["total_episode_this_epoch"] = total_count
-        extra_info["succeed_episode_this_epoch"] = ball_in_goal_count
-
-        self.rew_buf[:], self.reset_buf[:], self.extras = total_reward.detach(), reset, extra_info
+        
+        self.reset_buf[:] = reset
 
 
     def compute_observations(self):
-        self.gym.refresh_dof_state_tensor(self.sim)
-        self.gym.refresh_actor_root_state_tensor(self.sim)
-        self.gym.refresh_net_contact_force_tensor(self.sim)
-        self.gym.refresh_dof_force_tensor(self.sim)
 
         root_states = self.root_states[:, :]
         commands = self.commands
@@ -568,7 +666,50 @@ class Go1BallShoot(VecTask):
 
         self.obs_buf[:] = obs
 
-    
+    def _prepare_reward_function(self):
+        """ Prepares a list of reward functions, whcih will be called to compute the total reward.
+            Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.
+        """
+        # reward containers
+        from tasks.go1.shoot_rewards import RewardTerms
+        self.reward_container = RewardTerms(self)
+
+        # remove zero scales + multiply non-zero ones by dt
+        for key in list(self.reward_scales.keys()):
+            scale = self.reward_scales[key]
+            if scale == 0:
+                self.reward_scales.pop(key)
+            else:
+                self.reward_scales[key] *= self.dt
+        # prepare list of functions
+        self.reward_functions = []
+        self.reward_names = []
+        for name, scale in self.reward_scales.items():
+            if name == "termination":
+                continue
+
+            if not hasattr(self.reward_container, '_reward_' + name):
+                print(f"Warning: reward {'_reward_' + name} has nonzero coefficient but was not found!")
+            else:
+                self.reward_names.append(name)
+                self.reward_functions.append(getattr(self.reward_container, '_reward_' + name))
+
+        # reward episode sums
+        self.episode_sums = {
+            name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+            for name in self.reward_scales.keys()}
+        self.episode_sums["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+                                                 requires_grad=False)
+        self.episode_sums_eval = {
+            name: -1 * torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+            for name in self.reward_scales.keys()}
+        self.episode_sums_eval["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+                                                      requires_grad=False)
+        self.command_sums = {
+            name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+            for name in
+            list(self.reward_scales.keys()) + ["lin_vel_raw", "ang_vel_raw", "lin_vel_residual", "ang_vel_residual",
+                                               "ep_timesteps"]}
 
     def reset_idx(self, env_ids):
         # Randomization can happen only at reset time, since it can reset actor positions on GPU

@@ -70,21 +70,23 @@ env:
     FR_calf_joint: -1.5   # [rad]
     RR_calf_joint: -1.5     # [rad]
 
-#    joint for anymal
-#    LF_HAA: 0.03    # [rad]
-#    LH_HAA: 0.03    # [rad]
-#    RF_HAA: -0.03   # [rad]
-#    RH_HAA: -0.03   # [rad]
-#
-#    LF_HFE: 0.4     # [rad]
-#    LH_HFE: -0.4    # [rad]
-#    RF_HFE: 0.4     # [rad]
-#    RH_HFE: -0.4    # [rad]
-#
-#    LF_KFE: -0.8    # [rad]
-#    LH_KFE: 0.8     # [rad]
-#    RF_KFE: -0.8    # [rad]
-#    RH_KFE: 0.8     # [rad]
+  rewards:
+    rewardScales:
+      ball_speed: 1.0
+      torque: 0.00025
+      dog_heading_ball: 0.05 # once been 1/200
+      ball_dog_dis: 1.0
+      ball_goal_dis: 1.0
+      success: 1000.0
+
+
+    rewardParams:
+      ball_speed:
+        clip_max: 3.0
+      ball_dog_dis:
+        clip_min: 0.5
+      
+
 
 
 # for a1
@@ -111,10 +113,10 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 50
+    episodeLength_s: 5
     
     # termination
-    maxInGroundLength_s: 5
+    maxInGroundLength_s: 4
     maxStableLength_s: 3
 
   # viewer cam:
