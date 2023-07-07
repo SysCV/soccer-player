@@ -444,31 +444,82 @@ class Go1BallShoot(VecTask):
         self.stable_length[is_stable] += 1
 
     def compute_reward(self, actions):
-        # self.rew_buf[:], self.reset_buf[:] = compute_anymal_reward(
-        self.rew_buf[:], self.reset_buf[:], extra_info_to_log = self.compute_anymal_reward(
-                #
-            # tensors
-            self.root_states[:,:],
-            # if have balls added, this should be [::2,:],
-            # because a1 ball a1 ball ...
-            self.commands,
-            self.torques,
-            self.contact_forces,
-            self.knee_indices,
-            # length
-            self.progress_buf,
-            self.onground_length,
-            self.stable_length,
-            # Dict
-            self.rew_scales,
-            # other
-            self.base_index,
-            self.max_episode_length,
-            self.max_onground_length,
-            self.max_stable_length
-        )
-        self.extras.update(extra_info_to_log)
-        # self.extras["double"] = extra_info_to_log
+        base_quat = self.root_states[::3, 3:7]
+        base_pos = self.root_states[::3, 0:3]
+        ball_pos = self.root_states[1::3, 0:3]
+        goal_pos = self.root_states[2::3, 0:3]
+        ball_lin_vel_xy_world = self.root_states[1::3, 7:9]
+        extra_info = {}
+
+        ball_goal_distance_error = torch.sum(torch.square(ball_pos - goal_pos), dim=1)
+        ball_in_goal = (ball_goal_distance_error < 0.05)
+
+        reward_ball_in_goal = torch.zeros_like(ball_in_goal, dtype=torch.float, device=ball_in_goal.device)
+        reward_ball_in_goal[ball_in_goal] = 1000.
+
+        rew_distance = 10 * torch.exp(-ball_goal_distance_error)
+
+        ball_dog_distance_error = torch.sum(torch.square(ball_pos - base_pos), dim=1)
+        ball_dog_distance_error = torch.clamp_min(ball_dog_distance_error, 0.5)
+        rew_ball_dog_distance = 2 * torch.exp(-ball_dog_distance_error)
+
+        robot_heading = torch.tensor([[1., 0., 0.]] * base_pos.size(0), device=self.root_states.device)
+        base_quat_world = quat_rotate(base_quat, robot_heading)
+        base_to_ball_world = ball_pos - base_pos
+        base_quat_world_xy = base_quat_world[:, :3]
+        base_to_ball_world_xy = base_to_ball_world[:, :3]
+        base_quat_world_xy = base_quat_world_xy / torch.norm(base_quat_world_xy, dim=1, keepdim=True)
+        base_to_ball_world_xy = base_to_ball_world_xy / torch.norm(base_to_ball_world_xy, dim=1, keepdim=True)
+        dot_product = torch.sum(base_quat_world_xy * base_to_ball_world_xy, dim=1)
+        heading_reward = torch.exp(dot_product) / 200.
+
+        speed_error = torch.sum(torch.square(ball_lin_vel_xy_world - self.commands), dim=1)
+        rew_ball_speed = torch.exp(-speed_error)
+
+        ball_z = ball_pos[:, 2]
+        ball_z_reward = torch.exp(ball_z) / 4.
+
+
+        ball_speed_square = torch.sum(torch.square(ball_lin_vel_xy_world), dim=1)
+        command_speed_square = torch.sum(torch.square(self.commands), dim=1)
+        rew_have_speed = torch.tanh(torch.clamp_max(ball_speed_square, command_speed_square))
+
+        rew_torque = torch.sum(torch.square(self.torques), dim=1) * self.rew_scales["torque"]
+
+        total_reward = heading_reward + rew_distance + rew_have_speed + \
+            rew_torque \
+        # + ball_z_reward 
+        + rew_ball_dog_distance + reward_ball_in_goal
+
+        extra_info["each_reward/rew_distance"] = torch.sum(rew_distance).item()
+        extra_info["each_reward/rew_ball_dog_distance"] = torch.sum(rew_ball_dog_distance).item()
+        extra_info["each_reward/have_speed"] = torch.sum(rew_have_speed).item()
+        extra_info["each_reward/less_torque_reward"] = torch.sum(rew_torque).item()
+        extra_info["each_reward/ball_z_reward"] = torch.sum(ball_z_reward).item()
+
+        total_reward = torch.clip(total_reward, 0., None)
+
+        reset = torch.norm(self.contact_forces[:, self.base_index, :], dim=1) > 1.
+        reset = reset | torch.any(torch.norm(self.contact_forces[:, self.knee_indices, :], dim=2) > 1., dim=1)
+        reset = reset | (ball_pos[:, 0] - goal_pos[:, 0] > .1)
+        reset = reset | ball_in_goal
+
+        time_out = self.progress_buf >= self.max_episode_length - 1
+        onground_time_out = self.onground_length >= self.max_onground_length - 1
+        stable_time_out = self.stable_length >= self.max_stable_length - 1
+        reset = reset | time_out | onground_time_out | stable_time_out
+
+        ball_in_goal_count = torch.sum(ball_in_goal.int()).item()
+        total_count = torch.sum(reset.int()).item()
+
+        self.totall_episode += total_count
+        self.success_episode += ball_in_goal_count
+
+        extra_info["total_episode_this_epoch"] = total_count
+        extra_info["succeed_episode_this_epoch"] = ball_in_goal_count
+
+        self.rew_buf[:], self.reset_buf[:], self.extras = total_reward.detach(), reset, extra_info
+
 
     def compute_observations(self):
         self.gym.refresh_dof_state_tensor(self.sim)
@@ -517,7 +568,89 @@ class Go1BallShoot(VecTask):
 
         self.obs_buf[:] = obs
 
-    def compute_anymal_reward(
+    
+
+    def reset_idx(self, env_ids):
+        # Randomization can happen only at reset time, since it can reset actor positions on GPU
+        if self.randomize:
+            self.apply_randomizations(self.randomization_params)
+
+        positions_offset = torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+        velocities = torch_rand_float(-0.1, 0.1, (len(env_ids), self.num_dof), device=self.device)
+
+        self.dof_pos[env_ids] = self.default_dof_pos[env_ids] * positions_offset
+        self.dof_vel[env_ids] = velocities
+
+        self.onground_length[env_ids] = 0
+        self.stable_length[env_ids] = 0
+
+
+
+
+
+        actor_indices = torch.cat([env_ids*3,env_ids*3+1,env_ids*3+2]).clone()
+
+        if self.add_real_ball:
+            ball_states = self.initial_root_states.clone()
+            ball_states[1::3, 0] = torch.ones([self.num_envs]) * 0.5 + torch.rand([self.num_envs]) * 0.2 # jump by 2, because a1,ball,a1,ball
+            ball_states[1::3, 1] = torch.ones([self.num_envs]) * -0.5 + torch.rand([self.num_envs]) * 1.
+            ball_states[1::3, 2] = torch.ones(self.num_envs) * 0.15
+
+            # ball_states[1::3, 7] = torch.ones(self.num_envs) * - 1. * self.ball_init_speed
+
+            # goal_states = self.initial_root_states.clone()
+            ball_states[2::3, 0] = torch.ones([self.num_envs]) * 2 + torch.rand([self.num_envs]) * 0.5
+            ball_states[2::3, 1] = torch.rand([self.num_envs]) * 2 + torch.ones([self.num_envs]) * (- 1)
+            ball_states[2::3, 2] = torch.ones([self.num_envs]) * 0.1
+        
+        env_ids_int32 = env_ids.to(dtype=torch.int32)
+        actot_ids_int32 = actor_indices.to(dtype=torch.int32)
+
+        self.commands_x[env_ids] = ball_states[env_ids*3 + 2, 0]
+        self.commands_y[env_ids] = ball_states[env_ids*3 + 2, 1]
+        # self.commands_yaw[env_ids] = torch_rand_float(self.command_yaw_range[0], self.command_yaw_range[1], (len(env_ids), 1), device=self.device).squeeze()
+
+        # balls
+        if self.add_real_ball:
+
+            self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                         gymtorch.unwrap_tensor(ball_states),
+                                                         gymtorch.unwrap_tensor(actot_ids_int32), len(actot_ids_int32))
+            
+            # self.gym.set_actor_root_state_tensor_indexed(self.sim,
+            #         gymtorch.unwrap_tensor(ball_states),
+            #         gymtorch.unwrap_tensor(env_ids_int32 * 3 + 2), len(env_ids_int32))
+
+            # self.gym.set_actor_root_state_tensor_indexed(self.sim,
+            #                                          gymtorch.unwrap_tensor(ball_states),
+            #                                          gymtorch.unwrap_tensor(env_ids_int32*3 + 1), len(env_ids_int32))
+            
+
+            
+
+
+        else:
+            self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                         gymtorch.unwrap_tensor(self.initial_root_states),
+                                                         gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+
+
+        # need debug here ===> solved, env_ids_int32 should *2
+
+        self.gym.set_dof_state_tensor_indexed(self.sim,
+                                               gymtorch.unwrap_tensor(self.dof_state),
+                                               gymtorch.unwrap_tensor(env_ids_int32 * 3), len(env_ids_int32))
+
+        self.progress_buf[env_ids] = 0
+        self.reset_buf[env_ids] = 1
+
+
+#####################################################################
+###=========================jit functions=========================###
+#####################################################################
+
+
+def compute_anymal_reward(
     # tensors
     self,
     root_states,
@@ -535,8 +668,6 @@ class Go1BallShoot(VecTask):
     max_episode_length,
     max_onground_length,
     max_stable_length):
-    # type: (torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, float], int, int, int, int) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, float]]
-
     # (reward, reset, feet_in air, feet_air_time, episode sums)
 
         # prepare quantities (TODO: return from obs ?)
@@ -678,89 +809,6 @@ class Go1BallShoot(VecTask):
         # reset.fill_(0)
 
         return total_reward.detach(), reset, extra_info
-    
-
-    def reset_idx(self, env_ids):
-        # Randomization can happen only at reset time, since it can reset actor positions on GPU
-        if self.randomize:
-            self.apply_randomizations(self.randomization_params)
-
-        positions_offset = torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
-        velocities = torch_rand_float(-0.1, 0.1, (len(env_ids), self.num_dof), device=self.device)
-
-        self.dof_pos[env_ids] = self.default_dof_pos[env_ids] * positions_offset
-        self.dof_vel[env_ids] = velocities
-
-        self.onground_length[env_ids] = 0
-        self.stable_length[env_ids] = 0
-
-
-
-
-
-        actor_indices = torch.cat([env_ids*3,env_ids*3+1,env_ids*3+2]).clone()
-
-        if self.add_real_ball:
-            ball_states = self.initial_root_states.clone()
-            ball_states[1::3, 0] = torch.ones([self.num_envs]) * 0.5 + torch.rand([self.num_envs]) * 0.2 # jump by 2, because a1,ball,a1,ball
-            ball_states[1::3, 1] = torch.ones([self.num_envs]) * -0.5 + torch.rand([self.num_envs]) * 1.
-            ball_states[1::3, 2] = torch.ones(self.num_envs) * 0.15
-
-            # ball_states[1::3, 7] = torch.ones(self.num_envs) * - 1. * self.ball_init_speed
-
-            # goal_states = self.initial_root_states.clone()
-            ball_states[2::3, 0] = torch.ones([self.num_envs]) * 2 + torch.rand([self.num_envs]) * 0.5
-            ball_states[2::3, 1] = torch.rand([self.num_envs]) * 1 + torch.ones([self.num_envs]) * (- 0.5)
-            ball_states[2::3, 2] = torch.ones([self.num_envs]) * 0.1
-        
-        env_ids_int32 = env_ids.to(dtype=torch.int32)
-        actot_ids_int32 = actor_indices.to(dtype=torch.int32)
-
-        self.commands_x[env_ids] = ball_states[env_ids*3 + 2, 0]
-        self.commands_y[env_ids] = ball_states[env_ids*3 + 2, 1]
-        # self.commands_yaw[env_ids] = torch_rand_float(self.command_yaw_range[0], self.command_yaw_range[1], (len(env_ids), 1), device=self.device).squeeze()
-
-        # balls
-        if self.add_real_ball:
-
-            self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                         gymtorch.unwrap_tensor(ball_states),
-                                                         gymtorch.unwrap_tensor(actot_ids_int32), len(actot_ids_int32))
-            
-            # self.gym.set_actor_root_state_tensor_indexed(self.sim,
-            #         gymtorch.unwrap_tensor(ball_states),
-            #         gymtorch.unwrap_tensor(env_ids_int32 * 3 + 2), len(env_ids_int32))
-
-            # self.gym.set_actor_root_state_tensor_indexed(self.sim,
-            #                                          gymtorch.unwrap_tensor(ball_states),
-            #                                          gymtorch.unwrap_tensor(env_ids_int32*3 + 1), len(env_ids_int32))
-            
-
-            
-
-
-        else:
-            self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                         gymtorch.unwrap_tensor(self.initial_root_states),
-                                                         gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-
-
-        # need debug here ===> solved, env_ids_int32 should *2
-
-        self.gym.set_dof_state_tensor_indexed(self.sim,
-                                               gymtorch.unwrap_tensor(self.dof_state),
-                                               gymtorch.unwrap_tensor(env_ids_int32 * 3), len(env_ids_int32))
-
-        self.progress_buf[env_ids] = 0
-        self.reset_buf[env_ids] = 1
-
-
-#####################################################################
-###=========================jit functions=========================###
-#####################################################################
-
-
-
 
 
 @torch.jit.script

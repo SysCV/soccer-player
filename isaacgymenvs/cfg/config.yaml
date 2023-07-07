@@ -50,8 +50,8 @@ wandb_tags: []
 wandb_logcode_dir: '' 
 
 capture_video: False
-capture_video_freq: 1464
-capture_video_len: 100
+capture_video_freq: 6000
+capture_video_len: 300
 force_render: False
 
 # disables rendering
