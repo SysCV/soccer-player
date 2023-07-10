@@ -8,8 +8,8 @@ params:
     name: continuous_a2c_logstd
 
   network:
-    name: actor_critic
-    separate: False
+    name: actor_critic_s
+    separate: false
 
     space:
       continuous:
@@ -31,6 +31,17 @@ params:
         name: default
       regularizer:
         name: None
+
+    critic:
+      units: [64, 32]
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+
 
   load_checkpoint: ${if:${...checkpoint},True,False} # flag which sets whether to load the checkpoint
   load_path: ${...checkpoint} # path to the checkpoint to load

@@ -331,7 +331,7 @@ class Go1BallShoot(VecTask):
 
         goal_asset = asset_box #  circle_asset
 
-
+        silver_color = gymapi.Vec3(0.5, 0.5, 0.5)
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
@@ -342,7 +342,7 @@ class Go1BallShoot(VecTask):
             self.envs.append(env_ptr)
             self.a1_handles.append(a1_handle)
 
-            c = 0.5 * np.random.random(3)
+            c = 0.7 * np.random.random(3)
             color = gymapi.Vec3(c[0], c[1], c[2])
 
 
@@ -355,9 +355,9 @@ class Go1BallShoot(VecTask):
                 this_ball_props[0].restitution = 0.9
                 self.gym.set_actor_rigid_shape_properties(env_ptr, ball_handle, this_ball_props)
 
-                # this_ball_phy_props = self.gym.get_actor_rigid_body_properties(env_ptr, ball_handle)
-                # this_ball_phy_props[0].mass = 0.45
-                # self.gym.set_actor_rigid_body_properties(env_ptr, ball_handle, this_ball_phy_props)
+                this_ball_phy_props = self.gym.get_actor_rigid_body_properties(env_ptr, ball_handle)
+                this_ball_phy_props[0].mass = 0.45
+                self.gym.set_actor_rigid_body_properties(env_ptr, ball_handle, this_ball_phy_props)
 
 
                 self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color)
@@ -373,8 +373,13 @@ class Go1BallShoot(VecTask):
             # gymutil.draw_lines(sphere_geom, self.gym, self.viewer, env_ptr, gymapi.Transform(0,1,2))
 
 
-            # set color for each a1
+            # set color for each go1
+            self.gym.reset_actor_materials(env_ptr, a1_handle, gymapi.MESH_VISUAL_AND_COLLISION)
             self.gym.set_rigid_body_color(env_ptr, a1_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color)
+
+            # set silver for every other part of go1
+            for j in range(1,self.gym.get_actor_rigid_body_count(env_ptr, a1_handle)):
+                self.gym.set_rigid_body_color(env_ptr, a1_handle, j, gymapi.MESH_VISUAL_AND_COLLISION, color)
 
 
             if self.save_cam:
@@ -716,6 +721,7 @@ class Go1BallShoot(VecTask):
     def reset_idx(self, env_ids):
         # Randomization can happen only at reset time, since it can reset actor positions on GPU
         if self.randomize:
+            print("Randomizing...")
             self.apply_randomizations(self.randomization_params)
 
         positions_offset = torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
