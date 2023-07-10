@@ -22,18 +22,13 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   goalInitState:
-    # pos: [ 0.0, 0.0, 0.12 ] # x,y,z [m]
-    # rot: [ 0.00, 0.0, 0.0, 1.0 ] # x,y,z,w [quat]
-    # vLinear: [ 0.0, 0.0, 0.0 ]  # x,y,z [m/s]
-    # vAngular: [ 0.0, 0.0, 0.0 ]  # x,y,z [rad/s]
-    height: 0.1 # [m]
+    pos: [ 2.0, 0.0, 0.1 ] # x,y,z [m]
+    randomPosRange: [ 0.5, 2., 0.]
 
   ballInitState:
-    pos: [ 0.0, 0.0, 0.12 ] # x,y,z [m]
-    rot: [ 0.00, 0.0, 0.0, 1.0 ] # x,y,z,w [quat]
-    vLinear: [ 0.0, 0.0, 0.0 ]  # x,y,z [m/s]
-    vAngular: [ 0.0, 0.0, 0.0 ]  # x,y,z [rad/s]
-    ballInitSpeed: 0.0 # [m/s]
+    pos: [ 0.6, 0.0, 0.12 ] # x,y,z [m]
+    randomPosRange: [ -0.2, 1., 0. ]
+    # ballInitSpeed: 0.0 # [m/s]
 
   randomBallStateRanges:
     pos_x: [-0.5, 0.5] # min max [m]

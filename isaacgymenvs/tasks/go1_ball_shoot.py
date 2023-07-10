@@ -143,13 +143,16 @@ class Go1BallShoot(VecTask):
 
         state = pos + rot + v_lin + v_ang
 
-        # ball params
+
         self.base_init_state = state
+
+        # ball params
         self.ball_init_pos = self.cfg["env"]["ballInitState"]["pos"]
-        self.ball_init_speed = self.cfg["env"]["ballInitState"]["ballInitSpeed"]
+        self.ball_rand_pos_range = self.cfg["env"]["ballInitState"]["randomPosRange"]
 
         # goal params
-        self.goal_init_z = self.cfg["env"]["goalInitState"]["height"]
+        self.goal_init_pos = self.cfg["env"]["goalInitState"]["pos"]
+        self.goal_rand_pos_range = self.cfg["env"]["goalInitState"]["randomPosRange"]
 
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
@@ -348,7 +351,7 @@ class Go1BallShoot(VecTask):
 
             
             if self.add_real_ball:
-                ball_handle = self.gym.create_actor(env_ptr, asset_ball, start_pose, "ball", i, 0b001, 1)
+                ball_handle = self.gym.create_actor(env_ptr, asset_ball, gymapi.Transform(gymapi.Vec3(*self.ball_init_pos)), "ball", i, 0b001, 1)
 
                 this_ball_props = self.gym.get_actor_rigid_shape_properties(env_ptr,ball_handle)
                 this_ball_props[0].rolling_friction = 0.1
@@ -365,7 +368,7 @@ class Go1BallShoot(VecTask):
 
                 # set boxed marker for each env
 
-                goal_handle = self.gym.create_actor(env_ptr, goal_asset, gymapi.Transform(gymapi.Vec3(2,0,self.goal_init_z)), "box", i, 0b111, 1) # can be asset box
+                goal_handle = self.gym.create_actor(env_ptr, goal_asset, gymapi.Transform(gymapi.Vec3(*self.goal_init_pos)), "box", i, 0b111, 1) # can be asset box
 
                 self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color)
                 self.goal_handles.append(goal_handle)
@@ -740,30 +743,31 @@ class Go1BallShoot(VecTask):
         actor_indices = torch.cat([env_ids*3,env_ids*3+1,env_ids*3+2]).clone()
 
         if self.add_real_ball:
-            ball_states = self.initial_root_states.clone()
-            ball_states[1::3, 0] = torch.ones([self.num_envs]) * 0.5 + torch.rand([self.num_envs]) * 0.2 # jump by 2, because a1,ball,a1,ball
-            ball_states[1::3, 1] = torch.ones([self.num_envs]) * -0.5 + torch.rand([self.num_envs]) * 1.
-            ball_states[1::3, 2] = torch.ones(self.num_envs) * 0.15
+            ball_goal_states = self.initial_root_states.clone()
+            # jump by 2, because a1,ball,a1,ball
+            ball_goal_states[1::3, 0] = torch.ones([self.num_envs]) * (self.ball_init_pos[0] - self.ball_rand_pos_range[0] / 2.)  + torch.rand([self.num_envs]) * self.ball_rand_pos_range[0] 
+            ball_goal_states[1::3, 1] = torch.ones([self.num_envs]) * (self.ball_init_pos[1] - self.ball_rand_pos_range[1] / 2.)  + torch.rand([self.num_envs]) * self.ball_rand_pos_range[1]
+            ball_goal_states[1::3, 2] = torch.ones([self.num_envs]) * self.ball_init_pos[2] + torch.rand([self.num_envs]) * self.ball_rand_pos_range[2]
 
             # ball_states[1::3, 7] = torch.ones(self.num_envs) * - 1. * self.ball_init_speed
 
             # goal_states = self.initial_root_states.clone()
-            ball_states[2::3, 0] = torch.ones([self.num_envs]) * 2 + torch.rand([self.num_envs]) * 0.5
-            ball_states[2::3, 1] = torch.rand([self.num_envs]) * 2 + torch.ones([self.num_envs]) * (- 1)
-            ball_states[2::3, 2] = torch.ones([self.num_envs]) * 0.1
+            ball_goal_states[2::3, 0] = torch.ones([self.num_envs]) * (self.goal_init_pos[0] - self.goal_rand_pos_range[0] / 2.)  + torch.rand([self.num_envs]) * self.goal_rand_pos_range[0] 
+            ball_goal_states[2::3, 1] = torch.ones([self.num_envs]) * (self.goal_init_pos[1] - self.goal_rand_pos_range[1] / 2.)  + torch.rand([self.num_envs]) * self.goal_rand_pos_range[1]
+            ball_goal_states[2::3, 2] = torch.ones([self.num_envs]) * self.goal_init_pos[2] + torch.rand([self.num_envs]) * self.goal_rand_pos_range[2]
         
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         actot_ids_int32 = actor_indices.to(dtype=torch.int32)
 
-        self.commands_x[env_ids] = ball_states[env_ids*3 + 2, 0]
-        self.commands_y[env_ids] = ball_states[env_ids*3 + 2, 1]
+        self.commands_x[env_ids] = ball_goal_states[env_ids*3 + 2, 0]
+        self.commands_y[env_ids] = ball_goal_states[env_ids*3 + 2, 1]
         # self.commands_yaw[env_ids] = torch_rand_float(self.command_yaw_range[0], self.command_yaw_range[1], (len(env_ids), 1), device=self.device).squeeze()
 
         # balls
         if self.add_real_ball:
 
             self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                         gymtorch.unwrap_tensor(ball_states),
+                                                         gymtorch.unwrap_tensor(ball_goal_states),
                                                          gymtorch.unwrap_tensor(actot_ids_int32), len(actot_ids_int32))
             
             # self.gym.set_actor_root_state_tensor_indexed(self.sim,
