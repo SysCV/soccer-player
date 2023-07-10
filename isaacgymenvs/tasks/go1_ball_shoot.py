@@ -168,6 +168,8 @@ class Go1BallShoot(VecTask):
         self.Kp = self.cfg["env"]["control"]["stiffness"]
         self.Kd = self.cfg["env"]["control"]["damping"]
 
+        self._prepare_reward_function()
+
         self.max_onground_length_s = self.cfg["env"]["learn"]["maxInGroundLength_s"]
         self.max_stable_length_s = self.cfg["env"]["learn"]["maxStableLength_s"]
         self.max_stable_length = int(self.max_stable_length_s / self.dt + 0.5)
@@ -178,8 +180,8 @@ class Go1BallShoot(VecTask):
 
 
 
-        for key in self.rew_scales.keys():
-            self.rew_scales[key] *= self.dt
+        # for key in self.rew_scales.keys():
+        #     self.rew_scales[key] *= self.dt
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]
@@ -525,7 +527,7 @@ class Go1BallShoot(VecTask):
         self.ball_in_goal_now = (torch.sum(torch.square(self.ball_pos - self.goal_pos), dim=1) < 0.05)
 
 
-    def compute_reward_prev(self):
+    def compute_reward(self, actions):
         """ Compute rewards
             Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
             adds each terms to the episode sums and to the total reward
@@ -543,7 +545,7 @@ class Go1BallShoot(VecTask):
         self.extras.update(extra_info)
 
 
-    def compute_reward(self, actions):
+    def compute_reward_prev(self, actions):
 
         extra_info = {}
 

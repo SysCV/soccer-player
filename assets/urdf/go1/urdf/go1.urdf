@@ -1,34 +1,34 @@
 <?xml version="1.0" ?>
 <robot name="go1_description" xmlns:xacro="http://www.ros.org/wiki/xacro">
   <material name="black">
-    <color rgb="0.0 0.0 0.0"/>
+    <color rgba="0.0 0.0 0.0 1.0"/>
   </material>
   <material name="blue">
-    <color rgb="0.0 0.0 0.8"/>
+    <color rgba="0.0 0.0 0.8 1.0"/>
   </material>
   <material name="green">
-    <color rgb="0.0 0.8 0.0"/>
+    <color rgba="0.0 0.8 0.0 1.0"/>
   </material>
   <material name="grey">
-    <color rgb="0.2 0.2 0.2"/>
+    <color rgba="0.2 0.2 0.2 1.0"/>
   </material>
   <material name="silver-origin">
-    <color rgb="0.913725490196 0.913725490196 0.847058823529"/>
+    <color rgba="0.913725490196 0.913725490196 0.847058823529 1.0"/>
   </material>
   <material name="silver">
-    <color rgb="1. 1. 1."/>
+    <color rgba="1. 1. 1. 1.0"/>
   </material>
   <material name="orange">
-    <color rgb="1.0 0.423529411765 0.0392156862745"/>
+    <color rgba="1.0 0.423529411765 0.0392156862745 1.0"/>
   </material>
   <material name="brown">
-    <color rgb="0.870588235294 0.811764705882 0.764705882353"/>
+    <color rgba="0.870588235294 0.811764705882 0.764705882353 1.0"/>
   </material>
   <material name="red">
-    <color rgb="0.8 0.0 0.0"/>
+    <color rgba="0.8 0.0 0.0 1.0"/>
   </material>
   <material name="white">
-    <color rgb="1.0 1.0 1.0"/>
+    <color rgba="1.0 1.0 1.0 1.0"/>
   </material>
 
 
