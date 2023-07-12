@@ -1,10 +1,10 @@
 # used to create the object
-name: Go1BallShoot
+name: Go1WallKicker
 
 physics_engine: ${..physics_engine}
 
 env:
-  cameraSensor: true
+  cameraSensor: false
 
   numEnvs: ${resolve_default:4096,${...num_envs}}
   envSpacing: 2.  # [m]
@@ -25,7 +25,11 @@ env:
 
   goalInitState:
     pos: [ 2.0, 0.0, 0.1 ] # x,y,z [m]
-    randomPosRange: [ 0.5, 2., 0.]
+    randomPosRange: [ 0.0, 2., 0.]
+
+  wallInitState:
+    pos: [ 2.01, 0.0, 0.5 ] # x,y,z [m]
+    randomPosRange: [ 0.0, 0.0, 0.0]
 
   ballInitState:
     pos: [ 0.6, 0.0, 0.12 ] # x,y,z [m]

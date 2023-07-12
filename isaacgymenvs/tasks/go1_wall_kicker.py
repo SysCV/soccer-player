@@ -93,7 +93,7 @@ from isaacgymenvs.utils.torch_jit_utils import calc_heading
 from typing import Dict, Any, Tuple, List, Set
 
 
-class Go1BallShoot(VecTask):
+class Go1WallKicker(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
@@ -161,6 +161,10 @@ class Go1BallShoot(VecTask):
         # goal params
         self.goal_init_pos = self.cfg["env"]["goalInitState"]["pos"]
         self.goal_rand_pos_range = self.cfg["env"]["goalInitState"]["randomPosRange"]
+
+        # wall params
+        self.wall_init_pos = self.cfg["env"]["wallInitState"]["pos"]
+        self.wall_rand_pos_range = self.cfg["env"]["wallInitState"]["randomPosRange"]
 
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
@@ -317,8 +321,10 @@ class Go1BallShoot(VecTask):
         self.envs = []
         if self.add_real_ball:
             self.ball_handles = []
+
         
         self.goal_handles = []
+        self.wall_handles = []
 
         if self.have_cam:
             self.camera_handles = []
@@ -329,7 +335,14 @@ class Go1BallShoot(VecTask):
         asset_options_box = gymapi.AssetOptions()
         asset_options_box.density = 1.
         asset_options_box.fix_base_link = True
-        asset_box = self.gym.create_box(self.sim, 0.01, 0.3, 0.1, asset_options_box)
+        asset_box = self.gym.create_box(self.sim, 0.01, 0.3, 0.3, asset_options_box)
+
+        # wall asset
+        asset_options_wall = gymapi.AssetOptions()
+        asset_options_wall.density = 1.
+        asset_options_wall.fix_base_link = True
+        asset_wall = self.gym.create_box(self.sim, 0.01, 3, 1.5, asset_options_wall)
+    
 
         # circle booking mark
 
@@ -374,11 +387,20 @@ class Go1BallShoot(VecTask):
                 self.ball_handles.append(ball_handle)
 
                 # set boxed marker for each env
-
                 goal_handle = self.gym.create_actor(env_ptr, goal_asset, gymapi.Transform(gymapi.Vec3(*self.goal_init_pos)), "box", i, 0b111, 1) # can be asset box
 
                 self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color)
                 self.goal_handles.append(goal_handle)
+
+                # set wall for each env
+                wall_handle = self.gym.create_actor(env_ptr, asset_wall, gymapi.Transform(gymapi.Vec3(*self.wall_init_pos)), "wall", i, 0b100, 1) # can be asset box
+                this_wall_props = self.gym.get_actor_rigid_shape_properties(env_ptr,wall_handle)
+                this_wall_props[0].rolling_friction = 0.1
+                this_wall_props[0].restitution = 0.99
+                self.gym.set_actor_rigid_shape_properties(env_ptr, wall_handle, this_wall_props)
+
+                self.gym.set_rigid_body_color(env_ptr, wall_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(0.9,0.9,0.9))
+                self.goal_handles.append(wall_handle)
 
             # gymutil.draw_lines(sphere_geom, self.gym, self.viewer, env_ptr, gymapi.Transform(0,1,2))
 
@@ -394,7 +416,7 @@ class Go1BallShoot(VecTask):
 
             if self.have_cam:
                 camera_properties = gymapi.CameraProperties()
-                camera_properties.horizontal_fov = 165.0
+                camera_properties.horizontal_fov = 170.0
                 camera_properties.enable_tensors = True
                 camera_properties.width = 464
                 camera_properties.height = 400
@@ -530,16 +552,16 @@ class Go1BallShoot(VecTask):
         
 
         # state data
-        self.base_quat = self.root_states[::3, 3:7]
-        self.base_pos = self.root_states[::3, 0:3]
-        self.ball_pos = self.root_states[1::3, 0:3]
-        self.goal_pos = self.root_states[2::3, 0:3]
-        self.ball_lin_vel_xy_world = self.root_states[1::3, 7:9]
+        self.base_quat = self.root_states[::4, 3:7]
+        self.base_pos = self.root_states[::4, 0:3]
+        self.ball_pos = self.root_states[1::4, 0:3]
+        self.goal_pos = self.root_states[2::4, 0:3]
+        self.ball_lin_vel_xy_world = self.root_states[1::4, 7:9]
 
         #judgement data
         is_onground = torch.norm(self.contact_forces[:, self.ball_index, :], dim=1) > 0.1
         self.onground_length[is_onground] += 1
-        is_stable = ~(torch.any(self.root_states[1::3, 7:9]> 0.2, dim=1))
+        is_stable = ~(torch.any(self.root_states[1::4, 7:9]> 0.2, dim=1))
         self.stable_length[is_stable] += 1
         self.ball_in_goal_now = (torch.sum(torch.square(self.ball_pos - self.goal_pos), dim=1) < 0.05)
 
@@ -656,20 +678,20 @@ class Go1BallShoot(VecTask):
         dof_pos_scale = self.dof_pos_scale
         dof_vel_scale = self.dof_vel_scale
 
-        base_quat = root_states[::3, 3:7]
-        base_lin_vel = quat_rotate_inverse(base_quat, root_states[::3, 7:10]) * lin_vel_scale
-        base_ang_vel = quat_rotate_inverse(base_quat, root_states[::3, 10:13]) * ang_vel_scale
+        base_quat = root_states[::4, 3:7]
+        base_lin_vel = quat_rotate_inverse(base_quat, root_states[::4, 7:10]) * lin_vel_scale
+        base_ang_vel = quat_rotate_inverse(base_quat, root_states[::4, 10:13]) * ang_vel_scale
         projected_gravity = quat_rotate_inverse(base_quat, gravity_vec)
         dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
 
-        commands_scaled = root_states[2::3, 0:2] * torch.tensor(
+        commands_scaled = root_states[2::4, 0:2] * torch.tensor(
             [lin_vel_scale, lin_vel_scale],
             requires_grad=False,
             device=commands.device
         )
 
-        ball_states_p = root_states[1::3, 0:2] - root_states[0::3, 0:2]
-        ball_states_v = root_states[1::3, 8:10]
+        ball_states_p = root_states[1::4, 0:2] - root_states[0::4, 0:2]
+        ball_states_v = root_states[1::4, 8:10]
 
         obs = torch.cat((
             base_lin_vel,
@@ -749,27 +771,33 @@ class Go1BallShoot(VecTask):
 
 
 
-        actor_indices = torch.cat([env_ids*3,env_ids*3+1,env_ids*3+2]).clone()
+        actor_indices = torch.cat([env_ids*4,env_ids*4+1,env_ids*4+2,env_ids*4+3]).clone()
 
         if self.add_real_ball:
             ball_goal_states = self.initial_root_states.clone()
             # jump by 2, because a1,ball,a1,ball
-            ball_goal_states[1::3, 0] = torch.ones([self.num_envs]) * (self.ball_init_pos[0] - self.ball_rand_pos_range[0] / 2.)  + torch.rand([self.num_envs]) * self.ball_rand_pos_range[0] 
-            ball_goal_states[1::3, 1] = torch.ones([self.num_envs]) * (self.ball_init_pos[1] - self.ball_rand_pos_range[1] / 2.)  + torch.rand([self.num_envs]) * self.ball_rand_pos_range[1]
-            ball_goal_states[1::3, 2] = torch.ones([self.num_envs]) * self.ball_init_pos[2] + torch.rand([self.num_envs]) * self.ball_rand_pos_range[2]
+            ball_goal_states[1::4, 0] = torch.ones([self.num_envs]) * (self.ball_init_pos[0] - self.ball_rand_pos_range[0] / 2.)  + torch.rand([self.num_envs]) * self.ball_rand_pos_range[0] 
+            ball_goal_states[1::4, 1] = torch.ones([self.num_envs]) * (self.ball_init_pos[1] - self.ball_rand_pos_range[1] / 2.)  + torch.rand([self.num_envs]) * self.ball_rand_pos_range[1]
+            ball_goal_states[1::4, 2] = torch.ones([self.num_envs]) * self.ball_init_pos[2] + torch.rand([self.num_envs]) * self.ball_rand_pos_range[2]
 
             # ball_states[1::3, 7] = torch.ones(self.num_envs) * - 1. * self.ball_init_speed
 
             # goal_states = self.initial_root_states.clone()
-            ball_goal_states[2::3, 0] = torch.ones([self.num_envs]) * (self.goal_init_pos[0] - self.goal_rand_pos_range[0] / 2.)  + torch.rand([self.num_envs]) * self.goal_rand_pos_range[0] 
-            ball_goal_states[2::3, 1] = torch.ones([self.num_envs]) * (self.goal_init_pos[1] - self.goal_rand_pos_range[1] / 2.)  + torch.rand([self.num_envs]) * self.goal_rand_pos_range[1]
-            ball_goal_states[2::3, 2] = torch.ones([self.num_envs]) * self.goal_init_pos[2] + torch.rand([self.num_envs]) * self.goal_rand_pos_range[2]
+            ball_goal_states[2::4, 0] = torch.ones([self.num_envs]) * (self.goal_init_pos[0] - self.goal_rand_pos_range[0] / 2.)  + torch.rand([self.num_envs]) * self.goal_rand_pos_range[0] 
+            ball_goal_states[2::4, 1] = torch.ones([self.num_envs]) * (self.goal_init_pos[1] - self.goal_rand_pos_range[1] / 2.)  + torch.rand([self.num_envs]) * self.goal_rand_pos_range[1]
+            ball_goal_states[2::4, 2] = torch.ones([self.num_envs]) * self.goal_init_pos[2] + torch.rand([self.num_envs]) * self.goal_rand_pos_range[2]
+
+            ball_goal_states[3::4, 0] = torch.ones([self.num_envs]) * (self.wall_init_pos[0] - self.wall_rand_pos_range[0] / 2.)  + torch.rand([self.num_envs]) * self.wall_rand_pos_range[0]
+            ball_goal_states[3::4, 1] = torch.ones([self.num_envs]) * (self.wall_init_pos[1] - self.wall_rand_pos_range[1] / 2.)  + torch.rand([self.num_envs]) * self.wall_rand_pos_range[1]
+            ball_goal_states[3::4, 2] = torch.ones([self.num_envs]) * self.wall_init_pos[2] + torch.rand([self.num_envs]) * self.wall_rand_pos_range[2]
+
+
         
         env_ids_int32 = env_ids.to(dtype=torch.int32)
-        actot_ids_int32 = actor_indices.to(dtype=torch.int32)
+        actor_ids_int32 = actor_indices.to(dtype=torch.int32)
 
-        self.commands_x[env_ids] = ball_goal_states[env_ids*3 + 2, 0]
-        self.commands_y[env_ids] = ball_goal_states[env_ids*3 + 2, 1]
+        self.commands_x[env_ids] = ball_goal_states[env_ids*4 + 2, 0]
+        self.commands_y[env_ids] = ball_goal_states[env_ids*4 + 2, 1]
         # self.commands_yaw[env_ids] = torch_rand_float(self.command_yaw_range[0], self.command_yaw_range[1], (len(env_ids), 1), device=self.device).squeeze()
 
         # balls
@@ -777,7 +805,7 @@ class Go1BallShoot(VecTask):
 
             self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                          gymtorch.unwrap_tensor(ball_goal_states),
-                                                         gymtorch.unwrap_tensor(actot_ids_int32), len(actot_ids_int32))
+                                                         gymtorch.unwrap_tensor(actor_ids_int32), len(actor_ids_int32))
             
             # self.gym.set_actor_root_state_tensor_indexed(self.sim,
             #         gymtorch.unwrap_tensor(ball_states),
@@ -801,217 +829,8 @@ class Go1BallShoot(VecTask):
 
         self.gym.set_dof_state_tensor_indexed(self.sim,
                                                gymtorch.unwrap_tensor(self.dof_state),
-                                               gymtorch.unwrap_tensor(env_ids_int32 * 3), len(env_ids_int32))
+                                               gymtorch.unwrap_tensor(env_ids_int32 * 4), len(env_ids_int32))
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
 
-
-#####################################################################
-###=========================jit functions=========================###
-#####################################################################
-
-
-def compute_anymal_reward(
-    # tensors
-    self,
-    root_states,
-    commands,
-    torques,
-    contact_forces,
-    knee_indices,
-    episode_lengths,
-    onground_lengths,
-    stable_lengths,
-    # Dict
-    rew_scales,
-    # other
-    base_index,
-    max_episode_length,
-    max_onground_length,
-    max_stable_length):
-    # (reward, reset, feet_in air, feet_air_time, episode sums)
-
-        # prepare quantities (TODO: return from obs ?)
-        base_quat = root_states[::3, 3:7]
-        base_pos = root_states[::3, 0:3]
-        ball_pos = root_states[1::3, 0:3]
-        goal_pos = root_states[2::3, 0:3]
-        ball_lin_vel_xy_world = root_states[1::3, 7:9] # should multi by quat_inv to be xy_base
-        # base_lin_vel_base = quat_rotate_inverse(base_quat, root_states[::2, 7:10]) # should debug here!!!
-        # base_ang_vel = quat_rotate_inverse(base_quat, root_states[::2, 10:13])
-        extra_info:Dict[str, float] = {} # Dict[str, float]
-
-        # velocity tracking reward
-        # lin_vel_error = torch.sum(torch.square(commands[:, :2] - base_lin_vel[:, :2]), dim=1)
-        # ang_vel_error = torch.square(commands[:, 2] - base_ang_vel[:, 2])
-        # rew_lin_vel_xy = torch.exp(-lin_vel_error/0.25) * rew_scales["lin_vel_xy"]
-        # rew_ang_vel_z = torch.exp(-ang_vel_error/0.25) * rew_scales["ang_vel_z"]
-
-        # get goal close to ball
-        # distance_error = torch.sum(torch.square(ball_pos - base_pos), dim=1)
-        ball_goal_distance_error = torch.sum(torch.square(ball_pos - goal_pos), dim=1)
-
-        ball_in_goal = (ball_goal_distance_error < 0.1)
-
-        reward_ball_in_goal = torch.zeros_like(ball_in_goal, dtype=torch.float, device=ball_in_goal.device)
-
-        reward_ball_in_goal[ball_in_goal] = 1000.
-        # print("ball in the goal!!",count_in)
-
-        rew_distance = 10 * torch.exp(-ball_goal_distance_error)
-
-        # ball dog distance error 
-        ball_dog_distance_error = torch.sum(torch.square(ball_pos - base_pos), dim=1)
-
-        # clip the distance error smaller than 0.5
-        ball_dog_distance_error = torch.clamp_min(ball_dog_distance_error, 0.5)
-
-        rew_ball_dog_distance = 2 * torch.exp(-ball_dog_distance_error)
-
-
-        # heading to the ball
-        robot_heading = torch.tensor([[1., 0., 0.]] * base_pos.size(0),device=root_states.device)
-        base_quat_world = quat_rotate(base_quat, robot_heading)
-        base_to_ball_world = ball_pos - base_pos
-
-        base_quat_world_xy = base_quat_world[:, :3]
-        base_to_ball_world_xy = base_to_ball_world[:, :3]
-
-        # normalize the vectors
-        base_quat_world_xy = base_quat_world_xy / torch.norm(base_quat_world_xy, dim=1, keepdim=True)
-        base_to_ball_world_xy = base_to_ball_world_xy / torch.norm(base_to_ball_world_xy, dim=1, keepdim=True)
-
-        # compute the dot product
-        dot_product = torch.sum(base_quat_world_xy * base_to_ball_world_xy, dim=1)
-        
-        heading_reward = torch.exp(dot_product) / 200.
-
-
-        # ball follow command
-        speed_error = torch.sum(torch.square(ball_lin_vel_xy_world - commands), dim=1)
-        rew_ball_speed = torch.exp(-speed_error)
-
-        # reward ball in the air
-        ball_z = ball_pos[:, 2]
-
-        # print(ball_z.max().item())
-        
-        ball_z_reward = torch.exp(ball_z) / 4.
-
-        # reward successfully goal
-        if_goal = ball_goal_distance_error < 0.2
-
-        # but first need the ball to move
-        ball_speed_square = torch.sum(torch.square(ball_lin_vel_xy_world), dim=1)
-        command_speed_square = torch.sum(torch.square(commands), dim=1)
-        incorage_speed = torch.clamp_max(ball_speed_square, ball_speed_square)
-        rew_have_speed = torch.tanh(incorage_speed)
-
-        # head to ball
-        # headings = calc_heading(base_quat)
-        # print("===== ball in base ========",ball_pos - base_pos)
-
-        # ball_base = quat_rotate_inverse(base_quat, ball_pos - base_pos)
-
-        # rotation_error = calc_heading(ball_base)
-        # # print(rotation_error)
-
-        # rew_head_rotation = torch.exp(- torch.square(rotation_error))
-
-        # torque penalty
-        rew_torque = torch.sum(torch.square(torques), dim=1) * rew_scales["torque"]
-
-        # total_reward = ball_z_reward
-        
-        total_reward = heading_reward + rew_distance \
-        + rew_have_speed + rew_torque + ball_z_reward \
-        + rew_ball_dog_distance + reward_ball_in_goal #+ rew_ball_speed \
-        # print("shape!!",rew_lin_vel_xy.shape)
-        # print("item!!",torch.sum(rew_lin_vel_xy).item())
-        extra_info["each_reward/rew_distance"] = torch.sum(rew_distance).item()
-        extra_info["each_reward/rew_ball_dog_distance"] = torch.sum(rew_ball_dog_distance).item()
-        # extra_info["each_reward/speed_follow"] = torch.sum(rew_ball_speed).item()
-        extra_info["each_reward/have_speed"] = torch.sum(rew_have_speed).item()
-        # extra_info["rew_ang_vel_z_sum"] = torch.sum(rew_ang_vel_z).item()
-        extra_info["each_reward/less_torque_reward"] = torch.sum(rew_torque).item()
-        extra_info["each_reward/ball_z_reward"] = torch.sum(ball_z_reward).item()
-        # extra_info["each_reward/heading_reward"] = torch.sum(heading_reward).item()
-
-
-
-        total_reward = torch.clip(total_reward, 0., None)
-        # reset agents
-        reset = torch.norm(contact_forces[:, base_index, :], dim=1) > 1. # because each dog only have 1 base
-        reset = reset | torch.any(torch.norm(contact_forces[:, knee_indices, :], dim=2) > 1., dim=1) # because at least 4 knees, so knee_indices is a list
-
-        # reset = reset | (torch.norm(ball_pos - base_pos, dim=1) > 3.) # too far way
-        reset = reset | (ball_pos[:,0] - goal_pos[:,0] > .1) # further than the goal
-
-        reset = reset | ball_in_goal # ball in the goal
-
-        time_out = episode_lengths >= max_episode_length - 1  # no terminal reward for time-outs
-        onground_time_out = onground_lengths >= max_onground_length - 1
-        stable_time_out = stable_lengths >= max_stable_length - 1
-        reset = reset | time_out | onground_time_out | stable_time_out
-
-
-        ball_in_goal_count = torch.sum(ball_in_goal.int()).item()
-        total_count = torch.sum(reset.int()).item()
-
-        self.totall_episode += total_count
-        self.success_episode += ball_in_goal_count
-
-        # print("total_count",self.totall_episode)
-        # print("ball_in_goal_count",self.success_episode)
-
-        extra_info["total_episode_this_epoch"] = total_count
-        extra_info["succeed_episode_this_epoch"] = ball_in_goal_count
-        # for testing
-        # reset.fill_(0)
-
-        return total_reward.detach(), reset, extra_info
-
-
-@torch.jit.script
-def compute_anymal_observations(root_states,
-                                commands,
-                                dof_pos,
-                                default_dof_pos,
-                                dof_vel,
-                                gravity_vec,
-                                actions,
-                                lin_vel_scale,
-                                ang_vel_scale,
-                                dof_pos_scale,
-                                dof_vel_scale
-                                ):
-
-    # type: (torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, float, float, float, float) -> torch.Tensor
-    base_quat = root_states[::3, 3:7]
-    base_lin_vel = quat_rotate_inverse(base_quat, root_states[::3, 7:10]) * lin_vel_scale
-    base_ang_vel = quat_rotate_inverse(base_quat, root_states[::3, 10:13]) * ang_vel_scale
-    projected_gravity = quat_rotate_inverse(base_quat, gravity_vec)
-    dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
-
-    # commands_scaled = commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=commands.device)
-    commands_scaled = root_states[2::3, 0:2] * torch.tensor([lin_vel_scale, lin_vel_scale], requires_grad=False,
-                                              device=commands.device)
-
-    ball_states_p = root_states[1::3, 0:2] - root_states[0::3, 0:2] #  ball_p - a1_p
-    ball_states_v = root_states[1::3, 8:10]
-
-    obs = torch.cat((base_lin_vel,
-                     base_ang_vel,
-                     projected_gravity,
-                     commands_scaled,
-                     dof_pos_scaled,
-                     dof_vel*dof_vel_scale,
-                     actions,
-                     ball_states_p,
-                     ball_states_v
-                     ), dim=-1)
-
-    # 3 base_v + 3 base_w + 3 g + 2 (command) + 12(dof_p) + 12(dof_v) + 12 act + 4 ball
-
-    return obs

@@ -27,6 +27,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .go1_ball_shoot import Go1BallShoot
+from .go1_wall_kicker import Go1WallKicker
 from .a1ball_shoot import A1ballShoot
 from .ant import Ant
 from .anymal import Anymal
@@ -85,6 +86,7 @@ def resolve_allegro_kuka_two_arms(cfg, *args, **kwargs):
 
 # Mappings from strings to environments
 isaacgym_task_map = {
+    "Go1WallKicker": Go1WallKicker,
     "Go1BallShoot": Go1BallShoot, 
     "AllegroHand": AllegroHand,
     "AllegroKuka": resolve_allegro_kuka,
