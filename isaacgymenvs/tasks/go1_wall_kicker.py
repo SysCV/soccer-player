@@ -88,6 +88,7 @@ from isaacgym.torch_utils import *
 from isaacgym import gymutil
 
 from isaacgymenvs.tasks.base.vec_task import VecTask
+
 from isaacgymenvs.utils.torch_jit_utils import calc_heading
 
 from typing import Dict, Any, Tuple, List, Set
@@ -120,11 +121,11 @@ class Go1WallKicker(VecTask):
         self.reward_scales = self.cfg["env"]["rewards"]["rewardScales"]
         self.reward_params = self.cfg["env"]["rewards"]["rewardParams"]
 
-        # TODO: out-dated!!!
-        # self.rew_scales = {}
-        # self.rew_scales["lin_vel_xy"] = self.cfg["env"]["learn"]["linearVelocityXYRewardScale"]
-        # self.rew_scales["ang_vel_z"] = self.cfg["env"]["learn"]["angularVelocityZRewardScale"]
-        # self.rew_scales["torque"] = self.cfg["env"]["learn"]["torqueRewardScale"]
+        # termination conditions
+        self.robot_x_range = self.cfg["env"]["terminateCondition"]["robot_x_range"]
+        self.ball_x_range = self.cfg["env"]["terminateCondition"]["ball_x_range"]
+        self.ball_y_range = self.cfg["env"]["terminateCondition"]["ball_y_range"]
+
 
         # randomization
         self.randomization_params = self.cfg["task"]["randomization_params"]
@@ -153,10 +154,8 @@ class Go1WallKicker(VecTask):
 
         # ball params
         self.ball_init_pos = self.cfg["env"]["ballInitState"]["pos"]
-        print(self.ball_init_pos)
-        self.ball_rand_pos_range = self.cfg["env"]["ballInitState"]["randomPosRange"]
-        print(self.ball_rand_pos_range)
         self.ball_mass = self.cfg["env"]["ballInitState"]["mass"]
+        self.ball_rand_pos_range = self.cfg["env"]["ballInitState"]["randomPosRange"]
 
         # goal params
         self.goal_init_pos = self.cfg["env"]["goalInitState"]["pos"]
@@ -236,6 +235,7 @@ class Go1WallKicker(VecTask):
 
         # initialize some data used later on
         self.extras = {}
+        self.is_back = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
         self.initial_root_states = self.root_states.clone()
         self.initial_root_states[:] = to_torch(self.base_init_state, device=self.device, requires_grad=False)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
@@ -563,7 +563,12 @@ class Go1WallKicker(VecTask):
         self.onground_length[is_onground] += 1
         is_stable = ~(torch.any(self.root_states[1::4, 7:9]> 0.2, dim=1))
         self.stable_length[is_stable] += 1
+
         self.ball_in_goal_now = (torch.sum(torch.square(self.ball_pos - self.goal_pos), dim=1) < 0.05)
+
+        self.ball_near_wall_now = torch.abs(self.ball_pos[:,0] - self.wall_init_pos[0]) < 0.05
+
+        self.ball_near_robot_now = (torch.sum(torch.square(self.ball_pos - self.base_pos), dim=1) < 0.2)
 
 
     def compute_reward(self, actions):
@@ -654,7 +659,11 @@ class Go1WallKicker(VecTask):
         reset = reset | torch.any(torch.norm(self.contact_forces[:, self.knee_indices, :], dim=2) > 1., dim=1)
 
         reset = reset | (self.ball_pos[:, 0] - self.goal_pos[:, 0] > .1)
-        reset = reset | self.ball_in_goal_now
+        reset = reset | (self.base_pos[:, 0] < self.robot_x_range[0]) | (self.base_pos[:, 0] > self.robot_x_range[1])
+        reset = reset | (self.ball_pos[:, 1] < self.ball_y_range[0]) | (self.ball_pos[:, 1] > self.ball_y_range[1])
+        reset = reset | (self.ball_pos[:, 0] < self.ball_x_range[0]) | (self.ball_pos[:, 0] > self.ball_x_range[1])
+
+        # reset = reset | self.ball_in_goal_now
 
         time_out = self.progress_buf >= self.max_episode_length - 1
         onground_time_out = self.onground_length >= self.max_onground_length - 1
@@ -712,7 +721,7 @@ class Go1WallKicker(VecTask):
             Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.
         """
         # reward containers
-        from tasks.go1.shoot_rewards import RewardTerms
+        from isaacgymenvs.tasks.go1func.wall_rewards import RewardTerms
         self.reward_container = RewardTerms(self)
 
         # remove zero scales + multiply non-zero ones by dt

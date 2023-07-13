@@ -3,11 +3,11 @@ import numpy as np
 from isaacgym.torch_utils import *
 from isaacgym import gymapi
 
-from isaacgymenvs.tasks.go1_ball_shoot import Go1BallShoot
+from isaacgymenvs.tasks.go1_wall_kicker import Go1WallKicker
 
 
 class RewardTerms:
-    def __init__(self, env: Go1BallShoot):
+    def __init__(self, env: Go1WallKicker):
         self.env = env
 
     # ------------ reward functions----------------
@@ -20,6 +20,7 @@ class RewardTerms:
         # Tracking of angular velocity commands (yaw)
         ang_vel_error = torch.square(self.env.commands[:, 2] - self.env.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error / self.env.cfg.rewards.tracking_sigma_yaw)
+    
     
     def every(self):
         rew_distance = self._reward_ball_goal_dis()
@@ -79,3 +80,29 @@ class RewardTerms:
         reward_ball_in_goal = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
         reward_ball_in_goal[self.env.ball_in_goal_now] = 1.
         return reward_ball_in_goal
+    
+    def _reward_hit_and_switch(self):
+        reward_index = self.env.ball_in_goal_now & (~self.env.is_back)
+        self.env.is_back[reward_index] = True
+        reward_hit = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
+        reward_hit[reward_index] = 1.
+        return reward_hit
+    
+    def _reward_hit_wall_and_switch(self):
+        reward_index = self.env.ball_near_wall_now & (~self.env.is_back)
+        self.env.is_back[reward_index] = True
+        reward_hit = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
+        ball_goal_distance_error = torch.sum(torch.square(self.env.ball_pos - self.env.goal_pos), dim=1)
+
+        rew_distance = torch.exp(-ball_goal_distance_error)
+        reward_hit[reward_index] = 1. + rew_distance[reward_index]
+        return reward_hit
+
+
+    def _reward_catch_and_switch(self):
+        reward_index = self.env.ball_near_robot_now & self.env.is_back
+        self.env.is_back[reward_index] = False
+        reward_catch = torch.zeros_like(self.env.ball_near_robot_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
+        reward_catch[reward_index] = 1.
+        return reward_catch
+

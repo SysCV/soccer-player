@@ -1,27 +1,20 @@
 # used to create the object
-name: Go1WallKicker
+name: Go1
 
 physics_engine: ${..physics_engine}
 
 env:
-  cameraSensor: false
-
-  terminateCondition:
-    robot_x_range: [-1.0, 2.0] # [m]
-    ball_x_range: [-1.5, 3.5] # [m]
-    ball_y_range: [-3, 3] # [m]
-
-
-  numEnvs: ${resolve_default:4096,${...num_envs}}
+  real_robot: true
+  numEnvs: ${resolve_default:1024,${...num_envs}}
   envSpacing: 2.  # [m]
 
   clipObservations: 5.0
   clipActions: 1.0
 
   plane:
-    staticFriction: 0.8  # [-]
-    dynamicFriction: 0.6  # [-]
-    restitution: 0.9       # [-]
+    staticFriction: 1.0  # [-]
+    dynamicFriction: 1.0  # [-]
+    restitution: 0.        # [-]
 
   baseInitState:
     pos: [0.0, 0.0, 0.30] # x,y,z [m]
@@ -29,35 +22,16 @@ env:
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
-  goalInitState:
-    pos: [ 3.0, 0.0, 0.1 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 1., 0.]
-
-  wallInitState:
-    pos: [ 3.01, 0.0, 0.5 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 0.0, 0.0]
-
-  ballInitState:
-    pos: [ 0.6, 0.0, 0.12 ] # x,y,z [m]
-    randomPosRange: [ -0.2, 1., 0. ]
-    # ballInitSpeed: 0.0 # [m/s]
-    mass: 0.05 # [kg]
-
-  randomBallStateRanges:
-    pos_x: [-0.5, 0.5] # min max [m]
-    pos_y: [-0.5, 0.5] # min max [m]
-    v_x: [-0.5, 0.5] # min max [m/s]
-    v_y: [-0.5, 0.5] # min max [m/s]
-
   randomCommandVelocityRanges:
-    linear_x: [-2., 2.] # min max [m/s]
-    linear_y: [-2., 2.]   # min max [m/s]
-    yaw: [-1., 1.]          # min max [rad/s]
+    linear_x: [0.0, 0.5] # min max [m/s]
+    linear_y: [ -0.5, 0.5]   # min max [m/s]
+    yaw: [ -0.5, 0.5]          # min max [rad/s]
 
   control:
+    type: "pose_pd" # pose_pd / actuator_net
     # PD Drive parameters:
-    stiffness: 40.0  # [N*m/rad]
-    damping: 1.     # [N*m*s/rad]
+    stiffness: 20.0  # [N*m/rad]
+    damping: 0.5     # [N*m*s/rad]
     actionScale: 0.5
     controlFrequencyInv: 1 # 60 Hz
     # todo: change to a1 param?
@@ -78,26 +52,21 @@ env:
     FR_calf_joint: -1.5   # [rad]
     RR_calf_joint: -1.5     # [rad]
 
-  rewards:
-    rewardScales:
-      ball_speed: 1.0
-      torque: 0.00025
-      dog_heading_ball: 0.05 # once been 1/200
-      ball_dog_dis: 1.0
-      ball_goal_dis: 1.0
-      # success: 1000.0
-      # hit_and_switch: 1000.0
-      hit_wall_and_switch: 1000.0
-      catch_and_switch: 1000.0
-
-
-    rewardParams:
-      ball_speed:
-        clip_max: 3.0
-      ball_dog_dis:
-        clip_min: 0.5
-      
-
+#    joint for anymal
+#    LF_HAA: 0.03    # [rad]
+#    LH_HAA: 0.03    # [rad]
+#    RF_HAA: -0.03   # [rad]
+#    RH_HAA: -0.03   # [rad]
+#
+#    LF_HFE: 0.4     # [rad]
+#    LH_HFE: -0.4    # [rad]
+#    RF_HFE: 0.4     # [rad]
+#    RH_HFE: -0.4    # [rad]
+#
+#    LF_KFE: -0.8    # [rad]
+#    LH_KFE: 0.8     # [rad]
+#    RF_KFE: -0.8    # [rad]
+#    RH_KFE: 0.8     # [rad]
 
 
 # for a1
@@ -109,26 +78,19 @@ env:
     defaultDofDriveMode: 4 # see GymDofDriveModeFlags (0 is none, 1 is pos tgt, 2 is vel tgt, 4 effort)
 
   learn:
-    # # rewards
-    # baseBallDistanceRewardScale: 1.0
-    # BallVelocityProjectRewardScale: 1.0
-    # baseHeadingRewardScale: 1.0
-    # linearVelocityXYRewardScale: 1.0
-    # angularVelocityZRewardScale: 0.5
-    # torqueRewardScale: -0.00025 
+    # rewards
+    linearVelocityXYRewardScale: 1.0
+    angularVelocityZRewardScale: 0.5
+    torqueRewardScale: -0.000025 
 
     # normalization
-    linearVelocityScale: 1.0
+    linearVelocityScale: 2.0
     angularVelocityScale: 0.25
     dofPositionScale: 1.0
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 20
-    
-    # termination
-    maxInGroundLength_s: 20
-    maxStableLength_s: 4
+    episodeLength_s: 2
 
   # viewer cam:
   viewer:
@@ -161,11 +123,8 @@ sim:
     contact_collection: 1 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (broken - do not use!)
 
 task:
-
-  target_ball: True
-  target_goal: True
-  have_wall: False
-  actor_per_environment: 4
+  save_cam_pic: False
+  fake_ball: False
   randomize: False
   randomization_params:
     frequency: 600   # Define how many environment steps between generating new randomizations

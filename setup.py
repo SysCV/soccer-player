@@ -14,16 +14,16 @@ root_dir = os.path.dirname(os.path.realpath(__file__))
 # Minimum dependencies required prior to installation
 INSTALL_REQUIRES = [
     # RL
-    "gym==0.23.1",
-    "torch",
-    "omegaconf",
-    "termcolor",
-    "jinja2",
-    "hydra-core>=1.1",
-    "rl-games>=1.6.0",
-    "pyvirtualdisplay",
-    "isaacgym-stubs",
-    "wandb==14.2" #==0.14.2
+    # "gym==0.23.1",
+    # "torch",
+    # "omegaconf",
+    # "termcolor",
+    # "jinja2",
+    # "hydra-core>=1.1",
+    # "rl-games>=1.6.0",
+    # "pyvirtualdisplay",
+    # "isaacgym-stubs",
+    # "wandb==0.14.2" #==0.14.2
     ]
 
 
