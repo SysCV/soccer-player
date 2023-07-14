@@ -5,7 +5,7 @@ physics_engine: ${..physics_engine}
 
 env:
   real_robot: true
-  numEnvs: ${resolve_default:1024,${...num_envs}}
+  numEnvs: ${resolve_default:4096,${...num_envs}}
   envSpacing: 2.  # [m]
 
   clipObservations: 5.0
@@ -23,7 +23,7 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
-    linear_x: [0.0, 0.5] # min max [m/s]
+    linear_x: [-2.0, 2.0] # min max [m/s]
     linear_y: [ -0.5, 0.5]   # min max [m/s]
     yaw: [ -0.5, 0.5]          # min max [rad/s]
 
@@ -37,7 +37,7 @@ env:
     # todo: change to a1 param?
 
   defaultJointAngles:  # = target angles when action = 0.0
-    FL_hip_joint: .1   # [rad]
+    FL_hip_joint: 0.1   # [rad]
     RL_hip_joint: 0.1   # [rad]
     FR_hip_joint: -0.1  # [rad]
     RR_hip_joint: -0.1    # [rad]
@@ -125,7 +125,7 @@ sim:
 task:
   save_cam_pic: False
   fake_ball: False
-  randomize: False
+  randomize: True
   randomization_params:
     frequency: 600   # Define how many environment steps between generating new randomizations
     observations:

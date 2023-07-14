@@ -30,8 +30,8 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   goalInitState:
-    pos: [ 3.0, 0.0, 0.1 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 1., 0.]
+    pos: [ 3.0, 0.0, 0.2 ] # x,y,z [m]
+    randomPosRange: [ 0.0, 1.0, 0.15]
 
   wallInitState:
     pos: [ 3.01, 0.0, 0.5 ] # x,y,z [m]
@@ -39,7 +39,7 @@ env:
 
   ballInitState:
     pos: [ 0.6, 0.0, 0.12 ] # x,y,z [m]
-    randomPosRange: [ -0.2, 1., 0. ]
+    randomPosRange: [ 0.2, 0.5, 0. ]
     # ballInitSpeed: 0.0 # [m/s]
     mass: 0.05 # [kg]
 
@@ -56,9 +56,9 @@ env:
 
   control:
     # PD Drive parameters:
-    stiffness: 40.0  # [N*m/rad]
-    damping: 1.     # [N*m*s/rad]
-    actionScale: 0.5
+    stiffness: 20.0  # [N*m/rad]
+    damping: 0.5     # [N*m*s/rad]
+    actionScale: 0.7
     controlFrequencyInv: 1 # 60 Hz
     # todo: change to a1 param?
 
@@ -82,13 +82,14 @@ env:
     rewardScales:
       ball_speed: 1.0
       torque: 0.00025
-      dog_heading_ball: 0.05 # once been 1/200
-      ball_dog_dis: 1.0
-      ball_goal_dis: 1.0
-      # success: 1000.0
+      dog_heading_ball: 0.5 # once been 1/200
+      ball_dog_dis: 4.0
+      ball_goal_dis: 4.0
+      success: 1000.0
       # hit_and_switch: 1000.0
-      hit_wall_and_switch: 1000.0
-      catch_and_switch: 1000.0
+      hit_wall_and_switch: 100.0
+      catch_and_switch: 200.0
+      dog_wall_dis: 1.0
 
 
     rewardParams:
@@ -96,6 +97,10 @@ env:
         clip_max: 3.0
       ball_dog_dis:
         clip_min: 0.5
+      dog_wall_dis:
+        good_dis: 2.5
+
+
       
 
 

@@ -127,6 +127,8 @@ class Go1WallKicker(VecTask):
         self.ball_y_range = self.cfg["env"]["terminateCondition"]["ball_y_range"]
 
 
+
+
         # randomization
         self.randomization_params = self.cfg["task"]["randomization_params"]
         self.randomize = self.cfg["task"]["randomize"]
@@ -168,8 +170,8 @@ class Go1WallKicker(VecTask):
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
-        self.cfg["env"]["numObservations"] = 51 # todo: change here?
-        # 3 base_v + 3 base_w + 3 g + 2 (command_goal_on_ground) + 12(dof_p) + 12(dof_v) + 12 act + 4 (ball pose and velocity)
+        self.cfg["env"]["numObservations"] = 58 # todo: change here?
+        # 3 base_v + 3 base_w + 3 g + 2 (command_goal_on_ground) + 12(dof_p) + 12(dof_v) + 12 act + 4 (ball pose and velocity) + 3 (privilege) 
         self.cfg["env"]["numActions"] = 12 # todo:change here?
 
         # here call _creat_ground and _creat_env
@@ -183,6 +185,7 @@ class Go1WallKicker(VecTask):
         self.Kd = self.cfg["env"]["control"]["damping"]
 
         self._prepare_reward_function()
+        self.ball_in_goal_now = torch.zeros(self.num_envs, device=rl_device,dtype=torch.bool)
 
         self.max_onground_length_s = self.cfg["env"]["learn"]["maxInGroundLength_s"]
         self.max_stable_length_s = self.cfg["env"]["learn"]["maxStableLength_s"]
@@ -508,11 +511,22 @@ class Go1WallKicker(VecTask):
 
         # the reset is from the previous step
         # because we need the observation of 0 step, if compute_reset -> reset, we will lose the observation of 0 step
+
+        goal_env_ids = self.ball_in_goal_now.nonzero(as_tuple=False).squeeze(-1)
+        #print(goal_env_ids)
+        if len(goal_env_ids) > 0:
+            self.reset_only_target(goal_env_ids)
+
+
+
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1) # env_ides is [id1 id2 ...]
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
 
         self.refresh_self_buffers()
+
+
+
 
         self.compute_observations()
         self.compute_reset()
@@ -564,11 +578,15 @@ class Go1WallKicker(VecTask):
         is_stable = ~(torch.any(self.root_states[1::4, 7:9]> 0.2, dim=1))
         self.stable_length[is_stable] += 1
 
-        self.ball_in_goal_now = (torch.sum(torch.square(self.ball_pos - self.goal_pos), dim=1) < 0.05)
+        self.ball_in_goal_now = (torch.sum(torch.square(self.ball_pos[:,:] - self.goal_pos[:,:]), dim=1) < 0.3)
 
-        self.ball_near_wall_now = torch.abs(self.ball_pos[:,0] - self.wall_init_pos[0]) < 0.05
+        self.ball_near_wall_now = torch.abs(self.ball_pos[:,0] - self.wall_init_pos[0]) < 0.2
 
-        self.ball_near_robot_now = (torch.sum(torch.square(self.ball_pos - self.base_pos), dim=1) < 0.2)
+        self.ball_near_robot_now = (torch.sum(torch.square(self.ball_pos - self.base_pos), dim=1) < 0.5)
+
+        # print("now back:",self.is_back.item(),
+        #       "=== now near wall:",self.ball_near_wall_now.item(),
+        #         "=== now near robot:",self.ball_near_robot_now.item())
 
 
     def compute_reward(self, actions):
@@ -588,71 +606,6 @@ class Go1WallKicker(VecTask):
         extra_info["episode_cumulative"] = episode_cumulative
         self.extras.update(extra_info)
 
-
-    def compute_reward_prev(self, actions):
-
-        extra_info = {}
-
-        ball_goal_distance_error = torch.sum(torch.square(self.ball_pos - self.goal_pos), dim=1)
-
-
-        reward_ball_in_goal = torch.zeros_like(self.ball_in_goal_now, dtype=torch.float, device=self.ball_in_goal_now.device)
-        reward_ball_in_goal[self.ball_in_goal_now] = 1000.
-
-        rew_distance = 10 * torch.exp(-ball_goal_distance_error)
-
-        ball_dog_distance_error = torch.sum(torch.square(self.ball_pos - self.base_pos), dim=1)
-        ball_dog_distance_error = torch.clamp_min(ball_dog_distance_error, 0.5)
-        rew_ball_dog_distance = 2 * torch.exp(-ball_dog_distance_error)
-
-        robot_heading = torch.tensor([[1., 0., 0.]] * self.base_pos.size(0), device=self.root_states.device)
-        base_quat_world = quat_rotate(self.base_quat, robot_heading)
-        base_to_ball_world = self.ball_pos - self.base_pos
-        base_quat_world_xy = base_quat_world[:, :3]
-        base_to_ball_world_xy = base_to_ball_world[:, :3]
-        base_quat_world_xy = base_quat_world_xy / torch.norm(base_quat_world_xy, dim=1, keepdim=True)
-        base_to_ball_world_xy = base_to_ball_world_xy / torch.norm(base_to_ball_world_xy, dim=1, keepdim=True)
-        dot_product = torch.sum(base_quat_world_xy * base_to_ball_world_xy, dim=1)
-        heading_reward = torch.exp(dot_product) / 200.
-
-        speed_error = torch.sum(torch.square(self.ball_lin_vel_xy_world - self.commands), dim=1)
-        rew_ball_speed = torch.exp(-speed_error)
-
-        ball_z = self.ball_pos[:, 2]
-        ball_z_reward = torch.exp(ball_z) / 4.
-
-
-        ball_speed_square = torch.sum(torch.square(self.ball_lin_vel_xy_world), dim=1)
-        command_speed_square = torch.sum(torch.square(self.commands), dim=1)
-        rew_have_speed = torch.tanh(torch.clamp_max(ball_speed_square, command_speed_square))
-
-        rew_torque = torch.sum(torch.square(self.torques), dim=1) * self.rew_scales["torque"]
-
-        total_reward = heading_reward + rew_distance + rew_have_speed + \
-            rew_torque \
-        # + ball_z_reward 
-        + rew_ball_dog_distance + reward_ball_in_goal
-
-        extra_info["each_reward/rew_distance"] = torch.sum(rew_distance).item()
-        extra_info["each_reward/rew_ball_dog_distance"] = torch.sum(rew_ball_dog_distance).item()
-        extra_info["each_reward/have_speed"] = torch.sum(rew_have_speed).item()
-        extra_info["each_reward/less_torque_reward"] = torch.sum(rew_torque).item()
-        extra_info["each_reward/ball_z_reward"] = torch.sum(ball_z_reward).item()
-
-        total_reward = torch.clip(total_reward, 0., None)
-
-
-        # ball_in_goal_count = torch.sum(self.ball_in_goal_now.int()).item()
-        # total_count = torch.sum(reset.int()).item()
-
-        # self.totall_episode += total_count
-        # self.success_episode += ball_in_goal_count
-
-        # extra_info["total_episode_this_epoch"] = total_count
-        # extra_info["succeed_episode_this_epoch"] = ball_in_goal_count
-
-        self.rew_buf[:] = total_reward.detach()
-        self.extras.update(extra_info)
 
     def compute_reset(self):
         reset = torch.norm(self.contact_forces[:, self.base_index, :], dim=1) > 1.
@@ -688,6 +641,7 @@ class Go1WallKicker(VecTask):
         dof_vel_scale = self.dof_vel_scale
 
         base_quat = root_states[::4, 3:7]
+        base_pose_privileged = root_states[::4, 0:3]
         base_lin_vel = quat_rotate_inverse(base_quat, root_states[::4, 7:10]) * lin_vel_scale
         base_ang_vel = quat_rotate_inverse(base_quat, root_states[::4, 10:13]) * ang_vel_scale
         projected_gravity = quat_rotate_inverse(base_quat, gravity_vec)
@@ -711,7 +665,9 @@ class Go1WallKicker(VecTask):
             dof_vel * dof_vel_scale,
             actions,
             ball_states_p,
-            ball_states_v
+            ball_states_v,
+            base_pose_privileged,
+            base_quat
         ), dim=-1)
 
         self.obs_buf[:] = obs
@@ -760,6 +716,29 @@ class Go1WallKicker(VecTask):
             for name in
             list(self.reward_scales.keys()) + ["lin_vel_raw", "ang_vel_raw", "lin_vel_residual", "ang_vel_residual",
                                                "ep_timesteps"]}
+    def reset_only_target(self, env_ids):
+
+        num_ids = len(env_ids)
+        goal_indices = (env_ids*4+2).clone()
+        #print("goal_indices", goal_indices)
+        ball_goal_states: torch.Tensor = self.initial_root_states.clone()
+        # jump by 2, because a1,ball,a1,ball
+        #print("chosen tensor",ball_goal_states[goal_indices, 0])
+        ball_goal_states[goal_indices, 0] = torch.ones([num_ids],device=self.device) * (self.goal_init_pos[0] - self.goal_rand_pos_range[0] / 2.)  + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[0] 
+        ball_goal_states[goal_indices, 1] = torch.ones([num_ids],device=self.device) * (self.goal_init_pos[1] - self.goal_rand_pos_range[1] / 2.)  + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[1]
+        ball_goal_states[goal_indices, 2] = torch.ones([num_ids],device=self.device) * self.goal_init_pos[2] + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[2]
+     
+        actor_ids_int32 = goal_indices.to(dtype=torch.int32)
+
+
+        self.commands_x[env_ids] = ball_goal_states[env_ids*4 + 2, 0]
+        self.commands_y[env_ids] = ball_goal_states[env_ids*4 + 2, 1]
+        # self.commands_yaw[env_ids] = torch_rand_float(self.command_yaw_range[0], self.command_yaw_range[1], (len(env_ids), 1), device=self.device).squeeze()
+
+        # balls
+        self.gym.set_actor_root_state_tensor_indexed(self.sim,
+                                                         gymtorch.unwrap_tensor(ball_goal_states),
+                                                         gymtorch.unwrap_tensor(actor_ids_int32), len(actor_ids_int32))
 
     def reset_idx(self, env_ids):
         # Randomization can happen only at reset time, since it can reset actor positions on GPU
@@ -775,6 +754,7 @@ class Go1WallKicker(VecTask):
 
         self.onground_length[env_ids] = 0
         self.stable_length[env_ids] = 0
+        self.is_back[env_ids] = False
 
 
 
@@ -816,22 +796,6 @@ class Go1WallKicker(VecTask):
                                                          gymtorch.unwrap_tensor(ball_goal_states),
                                                          gymtorch.unwrap_tensor(actor_ids_int32), len(actor_ids_int32))
             
-            # self.gym.set_actor_root_state_tensor_indexed(self.sim,
-            #         gymtorch.unwrap_tensor(ball_states),
-            #         gymtorch.unwrap_tensor(env_ids_int32 * 3 + 2), len(env_ids_int32))
-
-            # self.gym.set_actor_root_state_tensor_indexed(self.sim,
-            #                                          gymtorch.unwrap_tensor(ball_states),
-            #                                          gymtorch.unwrap_tensor(env_ids_int32*3 + 1), len(env_ids_int32))
-            
-
-            
-
-
-        else:
-            self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                         gymtorch.unwrap_tensor(self.initial_root_states),
-                                                         gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
 
         # need debug here ===> solved, env_ids_int32 should *2

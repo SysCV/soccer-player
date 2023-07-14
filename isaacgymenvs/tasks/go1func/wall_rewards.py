@@ -77,16 +77,18 @@ class RewardTerms:
         return rew_distance
 
     def _reward_success(self):
-        reward_ball_in_goal = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
-        reward_ball_in_goal[self.env.ball_in_goal_now] = 1.
-        return reward_ball_in_goal
-    
-    def _reward_hit_and_switch(self):
         reward_index = self.env.ball_in_goal_now & (~self.env.is_back)
         self.env.is_back[reward_index] = True
-        reward_hit = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
-        reward_hit[reward_index] = 1.
-        return reward_hit
+        reward_ball_in_goal = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
+        reward_ball_in_goal[reward_index] = 1.
+        return reward_ball_in_goal
+    
+    # def _reward_hit_and_switch(self):
+    #     reward_index = self.env.ball_in_goal_now & (~self.env.is_back)
+    #     self.env.is_back[reward_index] = True
+    #     reward_hit = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
+    #     reward_hit[reward_index] = 1.
+    #     return reward_hit
     
     def _reward_hit_wall_and_switch(self):
         reward_index = self.env.ball_near_wall_now & (~self.env.is_back)
@@ -105,4 +107,10 @@ class RewardTerms:
         reward_catch = torch.zeros_like(self.env.ball_near_robot_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
         reward_catch[reward_index] = 1.
         return reward_catch
+    
+    def _reward_dog_wall_dis(self):
+        dog_wall_dis = torch.abs(self.env.base_pos[:,0] - self.env.goal_pos[:,0])
+        dog_wall_dis_error = torch.square(dog_wall_dis - self.env.reward_params["dog_wall_dis"]["good_dis"])
+        rew_dog_wall_dis = torch.exp(-dog_wall_dis_error)
+        return rew_dog_wall_dis
 
