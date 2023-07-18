@@ -77,7 +77,7 @@ class RewardTerms:
         return rew_distance
 
     def _reward_success(self):
-        reward_index = self.env.ball_in_goal_now & (~self.env.is_back)
+        reward_index = self.env.ball_in_goal_now & (~self.env.is_back) & self.env.ball_near_wall_now
         self.env.is_back[reward_index] = True
         reward_ball_in_goal = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
         reward_ball_in_goal[reward_index] = 1.
@@ -92,12 +92,19 @@ class RewardTerms:
     
     def _reward_hit_wall_and_switch(self):
         reward_index = self.env.ball_near_wall_now & (~self.env.is_back)
-        self.env.is_back[reward_index] = True
         reward_hit = torch.zeros_like(self.env.ball_in_goal_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
         ball_goal_distance_error = torch.sum(torch.square(self.env.ball_pos - self.env.goal_pos), dim=1)
-
         rew_distance = torch.exp(-ball_goal_distance_error)
         reward_hit[reward_index] = 1. + rew_distance[reward_index]
+
+
+
+        bonus_index = (ball_goal_distance_error < self.env.reward_params["hit_wall_and_switch"]["valid_success_range"]**2) & reward_index
+        reward_hit[bonus_index] += self.env.reward_params["hit_wall_and_switch"]["success_bonus_scale"] / self.env.rebound_times[bonus_index]
+
+        self.env.is_back[reward_index] = True
+        self.env.rebound_times[reward_index] += 1
+        self.env.rebound_times[bonus_index] = 0
         return reward_hit
 
 
@@ -106,6 +113,7 @@ class RewardTerms:
         self.env.is_back[reward_index] = False
         reward_catch = torch.zeros_like(self.env.ball_near_robot_now, dtype=torch.float, device=self.env.ball_in_goal_now.device)
         reward_catch[reward_index] = 1.
+        self.env.rebound_times[reward_index] += 1
         return reward_catch
     
     def _reward_dog_wall_dis(self):
@@ -113,4 +121,9 @@ class RewardTerms:
         dog_wall_dis_error = torch.square(dog_wall_dis - self.env.reward_params["dog_wall_dis"]["good_dis"])
         rew_dog_wall_dis = torch.exp(-dog_wall_dis_error)
         return rew_dog_wall_dis
+    
+    def _reward_collision(self):
+        # Penalize collisions on selected bodies
+        return torch.sum(1. * (torch.norm(self.env.contact_forces[:, self.env.penalised_contact_indices, :], dim=-1) > 0.1),
+                         dim=1)
 

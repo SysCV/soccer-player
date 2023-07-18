@@ -171,7 +171,7 @@ class Go1WallKicker(VecTask):
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
 
-        self.cfg["env"]["numObservations"] = 58
+        self.cfg["env"]["numObservations"] = 59
         # 3 base_v + 3 base_w + 3 g + 3 (command_goal_on_ground) + 12(dof_p) + 12(dof_v) + 12 act + 4 (ball pose and velocity) + 3 (privilege) 
         self.cfg["env"]["numActions"] = 12 
 
@@ -193,13 +193,9 @@ class Go1WallKicker(VecTask):
         self.max_stable_length = int(self.max_stable_length_s / self.dt + 0.5)
         self.max_onground_length = int(self.max_onground_length_s / self.dt + 0.5)
 
-        self.onground_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
-        self.stable_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+        self.create_sim_monitor()
+        self.create_self_buffers()
 
-
-
-        # for key in self.rew_scales.keys():
-        #     self.rew_scales[key] *= self.dt
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]
@@ -208,6 +204,10 @@ class Go1WallKicker(VecTask):
             cam_target = gymapi.Vec3(lookat[0], lookat[1], lookat[2])
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
 
+        
+        self.reset_idx(torch.arange(self.num_envs, device=self.device))
+
+    def create_sim_monitor(self):
         # get gym state tensors
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
@@ -227,7 +227,10 @@ class Go1WallKicker(VecTask):
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3)  # shape: num_envs, num_bodies, xyz axis
         self.torques = gymtorch.wrap_tensor(torques).view(self.num_envs, self.num_dof)
 
-        self.set_actor_root_state_object_indices: List[torch.Tensor] = []
+
+    def create_self_buffers(self):
+        # initialize some data used later on
+        self.extras = {}
 
         self.commands = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
 
@@ -242,16 +245,20 @@ class Go1WallKicker(VecTask):
             angle = self.named_default_joint_angles[name]
             self.default_dof_pos[:, i] = angle
 
-        # initialize some data used later on
-        self.extras = {}
+
         self.is_back = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
+        self.rebound_times = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+
         self.target_reset_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
+
         self.initial_root_states = self.root_states.clone()
         self.initial_root_states[:] = to_torch(self.base_init_state, device=self.device, requires_grad=False)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
 
-        self.reset_idx(torch.arange(self.num_envs, device=self.device))
+        self.actor_indices_for_reset: List[torch.Tensor] = []
+        self.onground_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+        self.stable_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
     def create_sim(self):
         self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
@@ -306,8 +313,10 @@ class Go1WallKicker(VecTask):
         # extremity_name = "foot"
         # feet_names = [s for s in body_names if extremity_name in s]
         # self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
-        knee_names = [s for s in body_names if "hip" in s]
+        knee_names = [s for s in body_names if ("hip" in s) or ("thigh" in s)]
         self.knee_indices = torch.zeros(len(knee_names), dtype=torch.long, device=self.device, requires_grad=False)
+        calf_names = [s for s in body_names if ("calf" in s)]
+        self.penalised_contact_indices = torch.zeros(len(calf_names), dtype=torch.long, device=self.device, requires_grad=False)
         self.base_index = 0
 
         dof_props = self.gym.get_asset_dof_properties(a1)
@@ -426,10 +435,10 @@ class Go1WallKicker(VecTask):
 
             if self.have_cam:
                 camera_properties = gymapi.CameraProperties()
-                camera_properties.horizontal_fov = 170.0
+                camera_properties.horizontal_fov = 130.0
                 camera_properties.enable_tensors = True
-                camera_properties.width = 464
-                camera_properties.height = 400
+                camera_properties.width = 224
+                camera_properties.height = 224
 
                 cam_handle = self.gym.create_camera_sensor(env_ptr, camera_properties)
                 camera_offset = gymapi.Vec3(0.3, 0, 0)
@@ -632,7 +641,7 @@ class Go1WallKicker(VecTask):
         
         self.reset_buf[:] = reset
 
-        self.target_reset_buf = self.ball_in_goal_now & ~ self.is_back
+        self.target_reset_buf = self.ball_in_goal_now & ~ self.is_back & ~ self.ball_near_wall_now
 
 
     def compute_observations(self):
@@ -656,8 +665,8 @@ class Go1WallKicker(VecTask):
         projected_gravity = quat_rotate_inverse(base_quat, gravity_vec)
         dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
 
-        commands_scaled = root_states[2::4, 0:2] * torch.tensor(
-            [lin_vel_scale, lin_vel_scale],
+        commands_scaled = root_states[2::4, 0:3] * torch.tensor(
+            [lin_vel_scale] * 3,
             requires_grad=False,
             device=commands.device
         )
@@ -729,12 +738,12 @@ class Go1WallKicker(VecTask):
 
         num_ids = len(env_ids)
         goal_indices = (env_ids*4+2)
-        print("goal_indices", goal_indices)
+        # print("goal_indices", goal_indices)
         # jump by 2, because a1,ball,a1,ball
         #print("chosen tensor",ball_goal_states[goal_indices, 0])
         self.root_states[goal_indices, 0] = torch.ones([num_ids],device=self.device) * (self.goal_init_pos[0] - self.goal_rand_pos_range[0] / 2.)  + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[0] 
         self.root_states[goal_indices, 1] = torch.ones([num_ids],device=self.device) * (self.goal_init_pos[1] - self.goal_rand_pos_range[1] / 2.)  + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[1]
-        self.root_states[goal_indices, 2] = torch.ones([num_ids],device=self.device) * self.goal_init_pos[2] + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[2]
+        self.root_states[goal_indices, 2] = torch.ones([num_ids],device=self.device) * (self.goal_init_pos[2] - self.goal_rand_pos_range[2] / 2.)+ torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[2]
      
         # actor_ids_int32 = goal_indices.to(dtype=torch.int32)
 
@@ -768,7 +777,7 @@ class Go1WallKicker(VecTask):
 
         actor_indices = torch.cat([env_ids*4,env_ids*4+1,env_ids*4+2,env_ids*4+3])
 
-        print("whole reset index", actor_indices)
+        # print("whole reset index", actor_indices)
 
         # copy initial robot and ball states
         self.root_states[env_ids*4] = self.initial_root_states[env_ids*4].clone()
@@ -777,18 +786,18 @@ class Go1WallKicker(VecTask):
         # jump by 2, because a1,ball,a1,ball
         self.root_states[env_ids*4+1, 0] = torch.ones([num_ids],device=self.device) * (self.ball_init_pos[0] - self.ball_rand_pos_range[0] / 2.)  + torch.rand([num_ids],device=self.device) * self.ball_rand_pos_range[0] 
         self.root_states[env_ids*4+1, 1] = torch.ones([num_ids],device=self.device) * (self.ball_init_pos[1] - self.ball_rand_pos_range[1] / 2.)  + torch.rand([num_ids],device=self.device) * self.ball_rand_pos_range[1]
-        self.root_states[env_ids*4+1, 2] = torch.ones([num_ids],device=self.device) * self.ball_init_pos[2] + torch.rand([num_ids],device=self.device) * self.ball_rand_pos_range[2]
+        self.root_states[env_ids*4+1, 2] = torch.ones([num_ids],device=self.device) * (self.ball_init_pos[2] - self.ball_rand_pos_range[2] / 2.) + torch.rand([num_ids],device=self.device) * self.ball_rand_pos_range[2]
 
         # ball_states[1::3, 7] = torch.ones(self.num_envs) * - 1. * self.ball_init_speed
 
         # goal_states = self.initial_root_states.clone()
         self.root_states[env_ids*4+2, 0] = torch.ones([num_ids],device=self.device) * (self.goal_init_pos[0] - self.goal_rand_pos_range[0] / 2.)  + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[0] 
         self.root_states[env_ids*4+2, 1] = torch.ones([num_ids],device=self.device) * (self.goal_init_pos[1] - self.goal_rand_pos_range[1] / 2.)  + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[1]
-        self.root_states[env_ids*4+2, 2] = torch.ones([num_ids],device=self.device) * self.goal_init_pos[2] + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[2]
+        self.root_states[env_ids*4+2, 2] = torch.ones([num_ids],device=self.device) * (self.goal_init_pos[2] - self.goal_rand_pos_range[2] / 2.) + torch.rand([num_ids],device=self.device) * self.goal_rand_pos_range[2]
 
         self.root_states[env_ids*4+3, 0] = torch.ones([num_ids],device=self.device) * (self.wall_init_pos[0] - self.wall_rand_pos_range[0] / 2.)  + torch.rand([num_ids],device=self.device) * self.wall_rand_pos_range[0]
         self.root_states[env_ids*4+3, 1] = torch.ones([num_ids],device=self.device) * (self.wall_init_pos[1] - self.wall_rand_pos_range[1] / 2.)  + torch.rand([num_ids],device=self.device) * self.wall_rand_pos_range[1]
-        self.root_states[env_ids*4+3, 2] = torch.ones([num_ids],device=self.device) * self.wall_init_pos[2] + torch.rand([num_ids],device=self.device) * self.wall_rand_pos_range[2]
+        self.root_states[env_ids*4+3, 2] = torch.ones([num_ids],device=self.device) * (self.wall_init_pos[2] - self.wall_rand_pos_range[2] / 2.)+ torch.rand([num_ids],device=self.device) * self.wall_rand_pos_range[2]
 
 
         
@@ -809,14 +818,14 @@ class Go1WallKicker(VecTask):
         self.reset_buf[env_ids] = 1
 
     def deferred_set_actor_root_state_tensor_indexed(self, obj_indices: List[torch.Tensor]) -> None:
-        self.set_actor_root_state_object_indices.append(obj_indices)
+        self.actor_indices_for_reset.append(obj_indices)
 
     def set_actor_root_state_tensor_indexed(self) -> None:
-        object_indices: List[torch.Tensor] = self.set_actor_root_state_object_indices
+        object_indices: List[torch.Tensor] = self.actor_indices_for_reset
         if not object_indices:
             # nothing to set
             return
-        print("index list:", object_indices)
+        # print("index list:", object_indices)
         unique_object_indices = torch.unique(torch.cat(object_indices).to(torch.int32))
 
         self.gym.set_actor_root_state_tensor_indexed(
@@ -826,5 +835,5 @@ class Go1WallKicker(VecTask):
             len(unique_object_indices),
         )
 
-        self.set_actor_root_state_object_indices = []
+        self.actor_indices_for_reset = []
 

@@ -5,6 +5,10 @@ physics_engine: ${..physics_engine}
 
 env:
   cameraSensor: false
+  cameraPlt: true
+  cam_width: 
+  cam_height:
+  cam_range: 130
 
   terminateCondition:
     robot_x_range: [-1.0, 2.0] # [m]
@@ -30,8 +34,8 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   goalInitState:
-    pos: [ 3.0, 0.0, 0.15 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 1.0, 0.0]
+    pos: [ 3.0, 0.0, 0.35 ] # x,y,z [m]
+    randomPosRange: [ 0.0, 2.0, 0.2]
 
   wallInitState:
     pos: [ 3.01, 0.0, 0.5 ] # x,y,z [m]
@@ -88,8 +92,9 @@ env:
       success: 1000.0
       # hit_and_switch: 1000.0
       hit_wall_and_switch: 100.0
-      catch_and_switch: 200.0
-      dog_wall_dis: 1.0
+      catch_and_switch: 100.0
+      dog_wall_dis: 2.0
+      collision: -10.0
 
 
     rewardParams:
@@ -99,6 +104,10 @@ env:
         clip_min: 0.5
       dog_wall_dis:
         good_dis: 2.5
+      hit_wall_and_switch:
+        success_bonus_scale: 20.0
+        hit_times_penalty: 1
+        valid_success_range: 0.15
 
 
       
