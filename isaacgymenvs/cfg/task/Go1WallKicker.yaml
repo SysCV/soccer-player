@@ -87,14 +87,15 @@ env:
       ball_speed: 1.0
       torque: 0.00025
       dog_heading_ball: 0.5 # once been 1/200
-      ball_dog_dis: 4.0
+      ball_dog_dis: 2.0
       ball_goal_dis: 4.0
-      success: 1000.0
+      # success: 1000.0
       # hit_and_switch: 1000.0
-      hit_wall_and_switch: 100.0
-      catch_and_switch: 100.0
-      dog_wall_dis: 2.0
+      hit_wall_and_switch: 50.0
+      catch_and_switch: 50.0
+      dog_wall_dis: 8.0
       collision: -10.0
+      ball_height: 10.0
 
 
     rewardParams:
@@ -105,9 +106,9 @@ env:
       dog_wall_dis:
         good_dis: 2.5
       hit_wall_and_switch:
-        success_bonus_scale: 20.0
+        success_bonus_scale: 80.0
         hit_times_penalty: 1
-        valid_success_range: 0.15
+        valid_success_range: 0.10
 
 
       
@@ -138,7 +139,7 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 20
+    episodeLength_s: 10
     
     # termination
     maxInGroundLength_s: 20

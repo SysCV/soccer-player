@@ -126,4 +126,9 @@ class RewardTerms:
         # Penalize collisions on selected bodies
         return torch.sum(1. * (torch.norm(self.env.contact_forces[:, self.env.penalised_contact_indices, :], dim=-1) > 0.1),
                          dim=1)
+    
+    def _reward_ball_height(self):
+        ball_z = self.env.ball_pos[:, 2]
+        # ball_z_reward = torch.exp(ball_z)
+        return ball_z
 

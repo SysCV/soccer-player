@@ -77,7 +77,10 @@
 #  10: 'RR_thigh_joint' (Rotation)
 #  11: 'RR_calf_joint' (Rotation)
 
+
+import wandb
 import numpy as np
+from matplotlib import pyplot as plt
 import os
 import torch
 
@@ -86,6 +89,7 @@ from isaacgym import gymapi
 from isaacgym.torch_utils import *
 
 from isaacgymenvs.tasks.base.vec_task import VecTask
+from isaacgymenvs.tasks.curricula.curriculum import RewardThresholdCurriculum
 
 from typing import Tuple, Dict
 
@@ -253,8 +257,13 @@ class Go1(VecTask):
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
-        self.cfg["env"]["numObservations"] = 48 # todo: change here?
-        self.cfg["env"]["numActions"] = 12 # todo:change here?
+        obs_space_dict = self.cfg["env"]["obs_num"]
+        total_obs_dim = 0
+        for val in obs_space_dict.values():
+            total_obs_dim += val
+        self.cfg["env"]["numObservations"] = total_obs_dim 
+    
+        self.cfg["env"]["numActions"] = self.cfg["env"]["act_num"] 
 
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
@@ -311,6 +320,32 @@ class Go1(VecTask):
         self.initial_root_states[:] = to_torch(self.base_init_state, device=self.device, requires_grad=False)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+
+        # init curriculum
+        self.curriculum = RewardThresholdCurriculum(seed=42,
+                x_vel=(self.cfg["env"]["randomCommandVelocityRanges"]           ["linear_x"][0],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][1],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_x"]),
+                y_vel=(self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][0],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][1],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_y"]),
+                yaw_vel=(self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][0],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][1],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_yaw"]))
+        
+        self.curriculum.set_to(low=np.array([-0.5, -0.2, -0.1]),high=np.array([0.5, 0.2, 0.1]))
+
+        self.env_command_bins = np.zeros(self.num_envs, dtype=np.int)
+        _, self.env_command_bins = self.curriculum.sample_bins(self.num_envs)
+
+        # print("env_command_bins is init as: ", self.env_command_bins)
+        self.task_rewards_episode = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.task_rewards_threshold = 5.0
+        self.have_plt_curriculum = False
+        self.total_train_step = 0
+
+
+
 
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
 
@@ -441,8 +476,9 @@ class Go1(VecTask):
     def pre_physics_step(self, actions):
         self.actions = actions.clone().to(self.device)
         targets = self.action_scale * self.actions + self.default_dof_pos
-        print("==== this time DOF targets",targets[0,:])
+
         if self.real:
+            print("==== this time DOF targets",targets[0,:])
             time.sleep(0.005)
             self.control_real_12dof(targets, 15., 1)
 
@@ -473,6 +509,7 @@ class Go1(VecTask):
                     self.sim, self.envs[i], self.camera_handles[i], gymapi.IMAGE_COLOR, rgb_filename)
 
     def compute_reward(self, actions):
+        self.total_train_step += 1
         # self.rew_buf[:], self.reset_buf[:] = compute_anymal_reward(
         self.rew_buf[:], self.reset_buf[:], extra_info_to_log = compute_anymal_reward(
                 #
@@ -491,6 +528,7 @@ class Go1(VecTask):
             self.base_index,
             self.max_episode_length,
         )
+        self.task_rewards_episode += self.rew_buf
         self.extras.update(extra_info_to_log)
         # self.extras["double"] = extra_info_to_log
 
@@ -500,20 +538,39 @@ class Go1(VecTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_dof_force_tensor(self.sim)
 
-        self.obs_buf[:] = compute_anymal_observations(  # tensors
-                                                        self.root_states[:,:],
-                                                        self.commands,
-                                                        self.dof_pos,
-                                                        self.default_dof_pos,
-                                                        self.dof_vel,
-                                                        self.gravity_vec,
-                                                        self.actions,
-                                                        # scales
-                                                        self.lin_vel_scale,
-                                                        self.ang_vel_scale,
-                                                        self.dof_pos_scale,
-                                                        self.dof_vel_scale
-        )
+        root_states = self.root_states[:, :]
+        commands = self.commands
+        dof_pos = self.dof_pos
+        default_dof_pos = self.default_dof_pos
+        dof_vel = self.dof_vel
+        gravity_vec = self.gravity_vec
+        actions = self.actions
+        lin_vel_scale = self.lin_vel_scale
+        ang_vel_scale = self.ang_vel_scale
+        dof_pos_scale = self.dof_pos_scale
+        dof_vel_scale = self.dof_vel_scale
+
+        base_quat = root_states[:, 3:7]
+        base_lin_vel = quat_rotate_inverse(base_quat, root_states[:, 7:10]) * lin_vel_scale
+        base_ang_vel = quat_rotate_inverse(base_quat, root_states[:, 10:13]) * ang_vel_scale
+        projected_gravity = quat_rotate_inverse(base_quat, gravity_vec)
+        dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
+
+        commands_scaled = commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=commands.device)
+
+
+        obs = torch.cat((
+            #base_lin_vel,
+            #base_ang_vel,
+            projected_gravity,
+            commands_scaled,
+            dof_pos_scaled,
+            dof_vel * dof_vel_scale,
+            actions,
+        ), dim=-1)
+
+        self.obs_buf[:] = obs
+
 
     def reset_idx(self, env_ids):
         # Randomization can happen only at reset time, since it can reset actor positions on GPU
@@ -526,11 +583,35 @@ class Go1(VecTask):
         self.dof_pos[env_ids] = self.default_dof_pos[env_ids] * positions_offset
         self.dof_vel[env_ids] = velocities
 
+        batch_size = len(env_ids)
+        
+        if batch_size != 0: 
+
+            old_bins = self.env_command_bins[env_ids.cpu().numpy()]
+            # print("old_bins_is",old_bins)
+
+            self.curriculum.update(old_bins, [self.task_rewards_episode[env_ids]], [self.task_rewards_threshold],
+                                  local_range=np.array(
+                                      [0.6,0.3,0.3]))
+            if self.total_train_step % (20 * 24) == 0 and not self.have_plt_curriculum:
+                self.have_plt_curriculum = True
+                print("plotting curriculum size", self.curriculum.weights_shaped.shape)
+                wandb.log({"curriculum": plt.imshow(np.sum(self.curriculum.weights_shaped, axis=2), cmap='gray').get_figure()})
+                # self.extras.update({"curriculum": plt.imshow(np.sum(self.curriculum.weights_shaped, axis=2), cmap='gray').get_figure()})
+            else:
+                self.have_plt_curriculum = False
+                self.extras.update({"curriculum": None})
+            
+
+            new_commands, new_bin_inds = self.curriculum.sample(batch_size=batch_size)
+            self.env_command_bins[env_ids.cpu().numpy()] = new_bin_inds
+            self.commands[env_ids, :] = torch.Tensor(new_commands[:, :]).to(self.device)
 
 
-        self.commands_x[env_ids] = torch_rand_float(self.command_x_range[0], self.command_x_range[1], (len(env_ids), 1), device=self.device).squeeze()
-        self.commands_y[env_ids] = torch_rand_float(self.command_y_range[0], self.command_y_range[1], (len(env_ids), 1), device=self.device).squeeze()
-        self.commands_yaw[env_ids] = torch_rand_float(self.command_yaw_range[0], self.command_yaw_range[1], (len(env_ids), 1), device=self.device).squeeze()
+
+        # self.commands_x[env_ids] = torch_rand_float(self.command_x_range[0], self.command_x_range[1], (len(env_ids), 1), device=self.device).squeeze()
+        # self.commands_y[env_ids] = torch_rand_float(self.command_y_range[0], self.command_y_range[1], (len(env_ids), 1), device=self.device).squeeze()
+        # self.commands_yaw[env_ids] = torch_rand_float(self.command_yaw_range[0], self.command_yaw_range[1], (len(env_ids), 1), device=self.device).squeeze()
 
         if self.add_fake_ball:
             ball_states = self.initial_root_states.clone()
@@ -539,19 +620,7 @@ class Go1(VecTask):
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
 
-
-        # balls
-        if self.add_fake_ball:
-            self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                         gymtorch.unwrap_tensor(self.initial_root_states),
-                                                         gymtorch.unwrap_tensor(env_ids_int32 * 2), len(env_ids_int32))
-
-            self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                     gymtorch.unwrap_tensor(ball_states),
-                                                     gymtorch.unwrap_tensor(env_ids_int32*2 + 1), len(env_ids_int32))
-
-        else:
-            self.gym.set_actor_root_state_tensor_indexed(self.sim,
+        self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                          gymtorch.unwrap_tensor(self.initial_root_states),
                                                          gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
@@ -580,6 +649,7 @@ class Go1(VecTask):
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
+        self.task_rewards_episode[env_ids] = 0
 
 
 #####################################################################
@@ -636,38 +706,3 @@ def compute_anymal_reward(
     return total_reward.detach(), reset, extra_info
 
 
-@torch.jit.script
-def compute_anymal_observations(root_states,
-                                commands,
-                                dof_pos,
-                                default_dof_pos,
-                                dof_vel,
-                                gravity_vec,
-                                actions,
-                                lin_vel_scale,
-                                ang_vel_scale,
-                                dof_pos_scale,
-                                dof_vel_scale
-                                ):
-
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, float, float, float, float) -> Tensor
-    base_quat = root_states[:, 3:7]
-    base_lin_vel = quat_rotate_inverse(base_quat, root_states[:, 7:10]) * lin_vel_scale
-    base_ang_vel = quat_rotate_inverse(base_quat, root_states[:, 10:13]) * ang_vel_scale
-    projected_gravity = quat_rotate(base_quat, gravity_vec)
-    dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
-
-    commands_scaled = commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=commands.device)
-
-    obs = torch.cat((base_lin_vel,
-                     base_ang_vel,
-                     projected_gravity,
-                     commands_scaled,
-                     dof_pos_scaled,
-                     dof_vel*dof_vel_scale,
-                     actions
-                     ), dim=-1)
-
-    # 3 base_v + 3 base_w + 3 g + 3 (command) + 12(dof_p) + 12(dof_v) + 12 act
-
-    return obs

@@ -39,6 +39,7 @@ from rl_games.common.algo_observer import AlgoObserver
 
 from isaacgymenvs.tasks import isaacgym_task_map
 from isaacgymenvs.utils.utils import set_seed, flatten_dict
+import matplotlib.pyplot as plt
 
 
 def multi_gpu_get_rank(multi_gpu):
@@ -175,10 +176,15 @@ class RLGPUAlgoObserver(AlgoObserver):
         if len(infos) > 0 and isinstance(infos, dict):  # allow direct logging from env
             infos_flat = flatten_dict(infos, prefix='', separator='/')
             self.direct_info = {}
+            self.media_info = {}
             for k, v in infos_flat.items():
                 # only log scalars
                 if isinstance(v, float) or isinstance(v, int) or (isinstance(v, torch.Tensor) and len(v.shape) == 0):
                     self.direct_info[k] = v
+                else:
+                    if isinstance(v, plt.Figure): #TODO: handle other types, limit to some types
+                        print(f'have figure {k}')
+                        self.media_info[k] = v
 
     def after_print_stats(self, frame, epoch_num, total_time):
         if self.ep_infos:
@@ -207,6 +213,11 @@ class RLGPUAlgoObserver(AlgoObserver):
             self.writer.add_scalar(f'{k}/frame', v, frame)
             self.writer.add_scalar(f'{k}/iter', v, epoch_num)
             self.writer.add_scalar(f'{k}/time', v, total_time)
+
+        for k, v in self.media_info.items():
+            print(f'add figure {k}')
+            self.writer.add_figure(f'{k}', v, frame)
+        self.media_info.clear()
 
 
 class MultiObserver(AlgoObserver):

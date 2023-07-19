@@ -4,9 +4,20 @@ name: Go1
 physics_engine: ${..physics_engine}
 
 env:
-  real_robot: true
+  real_robot: false
   numEnvs: ${resolve_default:4096,${...num_envs}}
   envSpacing: 2.  # [m]
+
+  obs_num:
+    # base_v: 3
+    # base_w: 3
+    gravity: 3 
+    command: 3
+    dof_p: 12
+    dof_v: 12
+    pre_act: 12
+
+  act_num: 12
 
   clipObservations: 5.0
   clipActions: 1.0
@@ -23,9 +34,12 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
-    linear_x: [-2.0, 2.0] # min max [m/s]
-    linear_y: [ -0.5, 0.5]   # min max [m/s]
+    linear_x: [-3.0, 3.0] # min max [m/s]
+    num_bins_x: 1
+    linear_y: [ -1.5, 1.5]   # min max [m/s]
+    num_bins_y: 1
     yaw: [ -0.5, 0.5]          # min max [rad/s]
+    num_bins_yaw: 1
 
   control:
     type: "pose_pd" # pose_pd / actuator_net
@@ -90,7 +104,7 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 2
+    episodeLength_s: 5
 
   # viewer cam:
   viewer:
