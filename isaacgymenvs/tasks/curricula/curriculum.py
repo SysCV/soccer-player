@@ -188,6 +188,7 @@ if __name__ == '__main__':
     plt.show()
 
     adjacents = r.get_local_bins(np.array([10, ]), ranges=0.3)
+    print(adjacents)
     for adjacent in adjacents:
         adjacent_inds = np.array(adjacent.nonzero()[0])
         # adjacent_inds = torch.Tensor(adjacent_inds)
@@ -210,6 +211,7 @@ if __name__ == '__main__':
     plt.show()
 
     adjacents = r.get_local_bins(np.array([10, ]), ranges=0.3)
+    print(adjacents)
     for adjacent in adjacents:
         adjacent_inds = np.array(adjacent.nonzero()[0])
         # adjacent_inds = torch.Tensor(adjacent_inds)
