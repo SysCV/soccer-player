@@ -170,10 +170,12 @@ class Go1WallKicker(VecTask):
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
+        numObservations = 0 
+        for k, v in self.cfg["env"]["state_observations"]:
+            numObservations += v
+        self.cfg["env"]["numObservations"] = numObservations
 
-        self.cfg["env"]["numObservations"] = 59
-        # 3 base_v + 3 base_w + 3 g + 3 (command_goal_on_ground) + 12(dof_p) + 12(dof_v) + 12 act + 4 (ball pose and velocity) + 3 (privilege) 
-        self.cfg["env"]["numActions"] = 12 
+        self.cfg["env"]["numActions"] = self.cfg["env"]["actions_num"]
 
         # here call _creat_ground and _creat_env
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
@@ -674,19 +676,45 @@ class Go1WallKicker(VecTask):
         ball_states_p = root_states[1::4, 0:2] - root_states[0::4, 0:2]
         ball_states_v = root_states[1::4, 8:10]
 
-        obs = torch.cat((
-            base_lin_vel,
-            base_ang_vel,
-            projected_gravity,
-            commands_scaled,
-            dof_pos_scaled,
-            dof_vel * dof_vel_scale,
-            actions,
-            ball_states_p,
-            ball_states_v,
-            base_pose_privileged,
-            base_quat
-        ), dim=-1)
+        cat_list = []
+        if self.cfg["env"]["obs"]["base_lin_vel"]:
+            cat_list.append(base_lin_vel)
+        if self.cfg["env"]["obs"]["base_ang_vel"]:
+            cat_list.append(base_ang_vel)
+        if self.cfg["env"]["obs"]["projected_gravity"]:
+            cat_list.append(projected_gravity)
+        if self.cfg["env"]["obs"]["commands"]:
+            cat_list.append(commands_scaled)
+        if self.cfg["env"]["obs"]["dof_pos"]:
+            cat_list.append(dof_pos_scaled)
+        if self.cfg["env"]["obs"]["dof_vel"]:
+            cat_list.append(dof_vel * dof_vel_scale)
+        if self.cfg["env"]["obs"]["last_actions"]:
+            cat_list.append(actions)
+        if self.cfg["env"]["obs"]["ball_states_p"]:
+            cat_list.append(ball_states_p)
+        if self.cfg["env"]["obs"]["ball_states_v"]:
+            cat_list.append(ball_states_v)
+        if self.cfg["env"]["obs"]["base_pose_privileged"]:
+            cat_list.append(base_pose_privileged)
+        if self.cfg["env"]["obs"]["base_quat"]:
+            cat_list.append(base_quat)
+        
+        obs = torch.cat(cat_list, dim=-1)
+
+        # obs = torch.cat((
+        #     base_lin_vel,
+        #     base_ang_vel,
+        #     projected_gravity,
+        #     commands_scaled,
+        #     dof_pos_scaled,
+        #     dof_vel * dof_vel_scale,
+        #     actions,
+        #     ball_states_p,
+        #     ball_states_v,
+        #     base_pose_privileged,
+        #     base_quat
+        # ), dim=-1)
 
         self.obs_buf[:] = obs
 

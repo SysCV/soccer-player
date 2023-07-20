@@ -10,6 +10,27 @@ env:
   cam_height:
   cam_range: 130
 
+  state_observations:
+    projected_gravity: 3
+    dof_pos: 12
+    dof_vel: 12
+    last_actions: 12
+
+  pixel_observations:
+
+
+  priviledgeStates:
+    base_lin_vel: 3
+    base_ang_vel: 3
+    ball_states_p: 3 
+    ball_states_v: 3
+    goal_pose: 3
+    base_pose: 3 
+    base_quat: 4
+
+  actions_num: 12
+
+
   terminateCondition:
     robot_x_range: [-1.0, 2.0] # [m]
     ball_x_range: [-1.5, 3.5] # [m]
@@ -34,8 +55,8 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   goalInitState:
-    pos: [ 3.0, 0.0, 0.35 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 2.0, 0.2]
+    pos: [ 3.0, 0.0, 0.15 ] # x,y,z [m]
+    randomPosRange: [ 0.0, 2.0, 0.0]
 
   wallInitState:
     pos: [ 3.01, 0.0, 0.5 ] # x,y,z [m]

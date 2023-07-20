@@ -89,7 +89,7 @@ from isaacgym import gymapi
 from isaacgym.torch_utils import *
 
 from isaacgymenvs.tasks.base.vec_task import VecTask
-from isaacgymenvs.tasks.curricula.curriculum import RewardThresholdCurriculum
+from isaacgymenvs.tasks.curricula.curriculum_torch import RewardThresholdCurriculum
 
 from typing import Tuple, Dict
 
@@ -322,7 +322,7 @@ class Go1(VecTask):
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
 
         # init curriculum
-        self.curriculum = RewardThresholdCurriculum(seed=42,
+        self.curriculum = RewardThresholdCurriculum(seed=42, device=self.device,
                 x_vel=(self.cfg["env"]["randomCommandVelocityRanges"]           ["linear_x"][0],
                         self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][1],
                         self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_x"]),
@@ -333,9 +333,13 @@ class Go1(VecTask):
                         self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][1],
                         self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_yaw"]))
         
-        self.curriculum.set_to(low=np.array([-0.5, -0.2, -0.1]),high=np.array([0.5, 0.2, 0.1]))
 
-        self.env_command_bins = np.zeros(self.num_envs, dtype=np.int)
+        low = torch.tensor([-0.5, -0.2, -0.1], device=self.device)
+        high = torch.tensor([0.5, 0.2, 0.1], device=self.device)
+
+        self.curriculum.set_to(low,high)
+
+        # self.env_command_bins = np.zeros(self.num_envs, dtype=np.int)
         _, self.env_command_bins = self.curriculum.sample_bins(self.num_envs)
 
         # print("env_command_bins is init as: ", self.env_command_bins)
@@ -587,25 +591,28 @@ class Go1(VecTask):
         
         if batch_size != 0: 
 
-            old_bins = self.env_command_bins[env_ids.cpu().numpy()]
+            old_bins = self.env_command_bins[env_ids]
             # print("old_bins_is",old_bins)
 
             self.curriculum.update(old_bins, [self.task_rewards_episode[env_ids]], [self.task_rewards_threshold],
-                                  local_range=np.array(
-                                      [0.6,0.3,0.3]))
-            if self.total_train_step % (20 * 24) == 0 and not self.have_plt_curriculum:
+                                  local_range=torch.tensor(
+                                      [0.6,0.3,0.3], device=self.device))
+            
+            if self.total_train_step % (50 * 24) == 0 and not self.have_plt_curriculum:
                 self.have_plt_curriculum = True
                 print("plotting curriculum size", self.curriculum.weights_shaped.shape)
-                wandb.log({"curriculum": plt.imshow(np.sum(self.curriculum.weights_shaped, axis=2), cmap='gray').get_figure()})
+
+                if wandb.run is not None:
+                    wandb.log({"curriculum": plt.imshow(torch.sum(self.curriculum.weights_shaped, axis=2).cpu(), cmap='gray').get_figure()})
                 # self.extras.update({"curriculum": plt.imshow(np.sum(self.curriculum.weights_shaped, axis=2), cmap='gray').get_figure()})
             else:
                 self.have_plt_curriculum = False
-                self.extras.update({"curriculum": None})
+                # self.extras.update({"curriculum": None})
             
 
             new_commands, new_bin_inds = self.curriculum.sample(batch_size=batch_size)
-            self.env_command_bins[env_ids.cpu().numpy()] = new_bin_inds
-            self.commands[env_ids, :] = torch.Tensor(new_commands[:, :]).to(self.device)
+            self.env_command_bins[env_ids] = new_bin_inds
+            self.commands[env_ids, :] = torch.tensor(new_commands[:, :]).to(self.device)
 
 
 
