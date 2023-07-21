@@ -82,6 +82,8 @@ import os
 import torch
 import matplotlib.pyplot as plt
 
+from gym import spaces
+
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym.torch_utils import *
@@ -98,16 +100,18 @@ class Go1WallKicker(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
-        if cfg["env"]["cameraSensor"]:
-            _, self.ax = plt.subplots()
-            plt.axis('off')
+
 
         self.totall_episode = 0
         self.success_episode = 0
 
         self.cfg = cfg
         # cam pic
-        self.have_cam = self.cfg["env"]["cameraSensor"]
+        self.have_cam_window = self.cfg["env"]["cameraSensorPlt"]
+        self.pixel_obs = self.cfg["env"]["pixel_observations"]["enable"]
+        if self.have_cam_window:
+            _, self.ax = plt.subplots()
+            plt.axis('off')
         self.add_real_ball = self.cfg["task"]["target_ball"]
 
         # normalization
@@ -170,8 +174,9 @@ class Go1WallKicker(VecTask):
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
-        numObservations = 0 
-        for k, v in self.cfg["env"]["state_observations"]:
+        numObservations = 0
+        # print(self.cfg["env"]["state_observations"])
+        for v in self.cfg["env"]["state_observations"].values():
             numObservations += v
         self.cfg["env"]["numObservations"] = numObservations
 
@@ -179,6 +184,11 @@ class Go1WallKicker(VecTask):
 
         # here call _creat_ground and _creat_env
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
+
+        # rewrite obs space
+        self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf),
+                                     "pixel_obs":spaces.Box(low=0, high=255, shape=(4, 224, 224, 3), dtype=np.uint8),
+                                    })
 
         # other
         self.dt = self.sim_params.dt
@@ -194,6 +204,12 @@ class Go1WallKicker(VecTask):
         self.max_stable_length_s = self.cfg["env"]["learn"]["maxStableLength_s"]
         self.max_stable_length = int(self.max_stable_length_s / self.dt + 0.5)
         self.max_onground_length = int(self.max_onground_length_s / self.dt + 0.5)
+
+        image_width = self.cfg["env"]["pixel_observations"]["width"]
+        image_height = self.cfg["env"]["pixel_observations"]["height"]
+        image_num = self.cfg["env"]["pixel_observations"]["history"]
+        image_channels = 3
+        self.history_images = torch.zeros([self.num_envs, image_num, image_height, image_width, image_channels], dtype=torch.uint8, device=self.device)
 
         self.create_sim_monitor()
         self.create_self_buffers()
@@ -347,9 +363,9 @@ class Go1WallKicker(VecTask):
         self.goal_handles = []
         self.wall_handles = []
 
-        if self.have_cam:
+        if self.pixel_obs:
             self.camera_handles = []
-            self.camera_tensor_imgs = []
+            self.camera_tensor_list = []
             self.frame_count = 0
 
         # box looking mark
@@ -386,8 +402,11 @@ class Go1WallKicker(VecTask):
             self.envs.append(env_ptr)
             self.a1_handles.append(a1_handle)
 
-            c = 0.7 * np.random.random(3)
-            color = gymapi.Vec3(c[0], c[1], c[2])
+            if self.pixel_obs:
+                color = gymapi.Vec3(1, 0, 0)
+            else:
+                c = 0.7 * np.random.random(3)
+                color = gymapi.Vec3(c[0], c[1], c[2])
 
 
             
@@ -435,7 +454,7 @@ class Go1WallKicker(VecTask):
                 self.gym.set_rigid_body_color(env_ptr, a1_handle, j, gymapi.MESH_VISUAL_AND_COLLISION, color)
 
 
-            if self.have_cam:
+            if self.pixel_obs:
                 camera_properties = gymapi.CameraProperties()
                 camera_properties.horizontal_fov = 130.0
                 camera_properties.enable_tensors = True
@@ -454,7 +473,7 @@ class Go1WallKicker(VecTask):
 
                 # wrap camera tensor in a pytorch tensor
                 torch_cam_tensor = gymtorch.wrap_tensor(cam_tensor)
-                self.camera_tensor_imgs.append(torch_cam_tensor)
+                self.camera_tensor_list.append(torch_cam_tensor)
 
 
         # for i in range(len(feet_names)):
@@ -492,15 +511,21 @@ class Go1WallKicker(VecTask):
         # apply actions
         self.pre_physics_step(action_tensor)
 
+
+
+
+
         # step physics and render each frame
         for i in range(self.control_freq_inv):
             if self.force_render:
                 self.render()
+
             self.gym.simulate(self.sim)
 
         # to fix!
         if self.device == 'cpu':
             self.gym.fetch_results(self.sim, True)
+
 
         # compute observations, rewards, resets, ...
         self.post_physics_step()
@@ -516,13 +541,24 @@ class Go1WallKicker(VecTask):
 
         self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
 
-        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        self.obs_dict["obs"] = {
+            "state_obs":
+            torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device),
+            "pixel_obs":
+            self.history_images.to(self.rl_device)
+        }
+
+        # for i in self.obs_dict["obs"].values():
+        #     print("i th env obs:", i.shape, i.dtype)
 
         # asymmetric actor-critic
         if self.num_states > 0:
             self.obs_dict["states"] = self.get_state()
 
+        # self.obs_dict["pixel"] = self.history_images.to(self.rl_device)
+
         return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
+    
 
     def post_physics_step(self):
         self.progress_buf += 1
@@ -550,10 +586,14 @@ class Go1WallKicker(VecTask):
         self.compute_reset()
         self.compute_reward(self.actions)
 
-        if self.have_cam:
+        if self.pixel_obs:
             self.frame_count += 1
+            if self.device != 'cpu':
+                self.gym.fetch_results(self.sim, True) # True means wait for GPU physics to finish, because we need to access the camera results
 
             self.gym.step_graphics(self.sim)
+            # self.render()
+            # self.gym.draw_viewer(self.viewer, self.sim, True)
 
             # render the camera sensors
             self.gym.render_all_camera_sensors(self.sim)
@@ -563,15 +603,23 @@ class Go1WallKicker(VecTask):
             # test_x = torch.randn(3, 4, 5, device='cuda:2')
             # print("test device is on [2]?!!!! is -- %d"%test_x.get_device())
 
-            if np.mod(self.frame_count, 1) == 0:
-                #for i in range(len(self.camera_handles)):
-                cam_img = self.camera_tensor_imgs[0][:,:,:3].cpu().numpy()
-                self.ax.imshow(cam_img) 
-                plt.draw()
-                plt.pause(0.001)
-                self.ax.cla()
+
+            camera_tensor_imgs = torch.stack(self.camera_tensor_list,dim=0)
+            self.history_images = torch.cat([camera_tensor_imgs[:,:,:,:3].unsqueeze(1).clone(),self.history_images[:,0:3,:,:,:3]],dim=1)
                     
             self.gym.end_access_image_tensors(self.sim)
+
+            if self.have_cam_window:
+                if np.mod(self.frame_count, 1) == 0:
+                    #for i in range(len(self.camera_handles)):
+                    up_row = torch.cat([self.history_images[0,0,:,:,:],self.history_images[0,1,:,:,:]],dim=1)
+                    low_row = torch.cat([self.history_images[0,2,:,:,:],self.history_images[0,3,:,:,:]],dim=1)
+                    whole_picture = torch.cat((up_row, low_row), dim=0)
+                    cam_img = whole_picture.cpu().numpy()
+                    self.ax.imshow(cam_img) 
+                    plt.draw()
+                    plt.pause(0.001)
+                    self.ax.cla()
 
     def refresh_self_buffers(self):
         # refresh
@@ -677,27 +725,28 @@ class Go1WallKicker(VecTask):
         ball_states_v = root_states[1::4, 8:10]
 
         cat_list = []
-        if self.cfg["env"]["obs"]["base_lin_vel"]:
+        # check dict have key
+        if "base_lin_vel" in self.cfg["env"]["state_observations"]:
             cat_list.append(base_lin_vel)
-        if self.cfg["env"]["obs"]["base_ang_vel"]:
+        if "base_ang_vel" in self.cfg["env"]["state_observations"]:
             cat_list.append(base_ang_vel)
-        if self.cfg["env"]["obs"]["projected_gravity"]:
+        if "projected_gravity" in self.cfg["env"]["state_observations"]:
             cat_list.append(projected_gravity)
-        if self.cfg["env"]["obs"]["commands"]:
+        if "commands" in self.cfg["env"]["state_observations"]:
             cat_list.append(commands_scaled)
-        if self.cfg["env"]["obs"]["dof_pos"]:
+        if "dof_pos" in self.cfg["env"]["state_observations"]:
             cat_list.append(dof_pos_scaled)
-        if self.cfg["env"]["obs"]["dof_vel"]:
+        if "dof_vel" in self.cfg["env"]["state_observations"]:
             cat_list.append(dof_vel * dof_vel_scale)
-        if self.cfg["env"]["obs"]["last_actions"]:
+        if "last_actions" in self.cfg["env"]["state_observations"]:
             cat_list.append(actions)
-        if self.cfg["env"]["obs"]["ball_states_p"]:
+        if "ball_states_p" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_p)
-        if self.cfg["env"]["obs"]["ball_states_v"]:
+        if "ball_states_v" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_v)
-        if self.cfg["env"]["obs"]["base_pose_privileged"]:
+        if "base_pose_privileged" in self.cfg["env"]["state_observations"]:
             cat_list.append(base_pose_privileged)
-        if self.cfg["env"]["obs"]["base_quat"]:
+        if "base_quat" in self.cfg["env"]["state_observations"]:
             cat_list.append(base_quat)
         
         obs = torch.cat(cat_list, dim=-1)
@@ -782,6 +831,26 @@ class Go1WallKicker(VecTask):
 
         self.deferred_set_actor_root_state_tensor_indexed(goal_indices)
 
+    def reset(self):
+        """Is called only once when environment starts to provide the first observations.
+        Doesn't calculate observations. Actual reset and observation calculation need to be implemented by user.
+        Returns:
+            Observation dictionary
+        """
+
+        self.obs_dict["obs"] = {
+            "state_obs":
+            torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device),
+            "pixel_obs":
+            self.history_images.to(self.rl_device)
+        }
+        # self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        # asymmetric actor-critic
+        if self.num_states > 0:
+            self.obs_dict["states"] = self.get_state()
+
+        return self.obs_dict
     def reset_idx(self, env_ids):
         num_ids = len(env_ids)
         # Randomization can happen only at reset time, since it can reset actor positions on GPU

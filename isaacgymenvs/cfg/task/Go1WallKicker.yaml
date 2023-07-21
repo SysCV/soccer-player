@@ -4,7 +4,7 @@ name: Go1WallKicker
 physics_engine: ${..physics_engine}
 
 env:
-  cameraSensor: false
+  cameraSensorPlt: False
   cameraPlt: true
   cam_width: 
   cam_height:
@@ -17,12 +17,17 @@ env:
     last_actions: 12
 
   pixel_observations:
+    enable: true
+    width: 224
+    height: 224
+    cam_range: 130
+    history: 4
 
 
   priviledgeStates:
     base_lin_vel: 3
     base_ang_vel: 3
-    ball_states_p: 3 
+    ball_states_p: 3
     ball_states_v: 3
     goal_pose: 3
     base_pose: 3 
@@ -37,7 +42,7 @@ env:
     ball_y_range: [-3, 3] # [m]
 
 
-  numEnvs: ${resolve_default:4096,${...num_envs}}
+  numEnvs: ${resolve_default:50,${...num_envs}}
   envSpacing: 2.  # [m]
 
   clipObservations: 5.0
