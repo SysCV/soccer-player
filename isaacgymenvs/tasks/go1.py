@@ -28,6 +28,7 @@
 
 # ======== Asset info unitree a1: ========
 # Got 17 bodies, 16 joints, and 12 DOFs
+# 
 # Bodies:
 #   0: 'base'
 #   1: 'FL_hip'
@@ -46,6 +47,7 @@
 #  14: 'RR_thigh'
 #  15: 'RR_calf'
 #  16: 'RR_foot'
+#
 # Joints:
 #   0: 'FL_hip_joint' (Revolute)
 #   1: 'FL_thigh_joint' (Revolute)
@@ -63,6 +65,7 @@
 #  13: 'RR_thigh_joint' (Revolute)
 #  14: 'RR_calf_joint' (Revolute)
 #  15: 'RR_foot_fixed' (Fixed)
+# 
 # DOFs:
 #   0: 'FL_hip_joint' (Rotation)
 #   1: 'FL_thigh_joint' (Rotation)
@@ -76,6 +79,8 @@
 #   9: 'RR_hip_joint' (Rotation)
 #  10: 'RR_thigh_joint' (Rotation)
 #  11: 'RR_calf_joint' (Rotation)
+#
+# ======== Asset info unitree a1: ========
 
 
 import wandb
@@ -98,102 +103,7 @@ import time
 import math
 
 
-
-
-currentdir = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(currentdir + '/unitreelib')
-import robot_interface as sdk
-
-
 class Go1(VecTask):
-    def control_real_12dof(self, action: torch.Tensor, Kp: float, Kd: float):
-        q_target = action[0].clone().cpu().numpy()
-        d = self.d
-        self.cmd.motorCmd[d['FR_0']].q = q_target[3]
-        self.cmd.motorCmd[d['FR_0']].dq = 0
-        self.cmd.motorCmd[d['FR_0']].Kp = Kp
-        self.cmd.motorCmd[d['FR_0']].Kd = Kd
-        self.cmd.motorCmd[d['FR_0']].tau = -0.65
-
-        self.cmd.motorCmd[d['FR_1']].q = q_target[4]
-        self.cmd.motorCmd[d['FR_1']].dq = 0
-        self.cmd.motorCmd[d['FR_1']].Kp = Kp
-        self.cmd.motorCmd[d['FR_1']].Kd = Kd
-        self.cmd.motorCmd[d['FR_1']].tau = 0.0
-
-        self.cmd.motorCmd[d['FR_2']].q =  q_target[5]
-        self.cmd.motorCmd[d['FR_2']].dq = 0
-        self.cmd.motorCmd[d['FR_2']].Kp = Kp
-        self.cmd.motorCmd[d['FR_2']].Kd = Kd
-        self.cmd.motorCmd[d['FR_2']].tau = 0.0
-
-        self.cmd.motorCmd[d['FL_0']].q = q_target[0]
-        self.cmd.motorCmd[d['FL_0']].dq = 0
-        self.cmd.motorCmd[d['FL_0']].Kp = Kp
-        self.cmd.motorCmd[d['FL_0']].Kd = Kd
-        self.cmd.motorCmd[d['FL_0']].tau = -0.65
-
-        self.cmd.motorCmd[d['FL_1']].q = q_target[1]
-        self.cmd.motorCmd[d['FL_1']].dq = 0
-        self.cmd.motorCmd[d['FL_1']].Kp = Kp
-        self.cmd.motorCmd[d['FL_1']].Kd = Kd
-        self.cmd.motorCmd[d['FL_1']].tau = 0.0
-
-        self.cmd.motorCmd[d['FL_2']].q =  q_target[2]
-        self.cmd.motorCmd[d['FL_2']].dq = 0
-        self.cmd.motorCmd[d['FL_2']].Kp = Kp
-        self.cmd.motorCmd[d['FL_2']].Kd = Kd
-        self.cmd.motorCmd[d['FL_2']].tau = 0.0
-
-        self.cmd.motorCmd[d['RR_0']].q = q_target[9]
-        self.cmd.motorCmd[d['RR_0']].dq = 0
-        self.cmd.motorCmd[d['RR_0']].Kp = Kp
-        self.cmd.motorCmd[d['RR_0']].Kd = Kd
-        self.cmd.motorCmd[d['RR_0']].tau = -0.65
-
-        self.cmd.motorCmd[d['RR_1']].q = q_target[10]
-        self.cmd.motorCmd[d['RR_1']].dq = 0
-        self.cmd.motorCmd[d['RR_1']].Kp = Kp
-        self.cmd.motorCmd[d['RR_1']].Kd = Kd
-        self.cmd.motorCmd[d['RR_1']].tau = 0.0
-
-        self.cmd.motorCmd[d['RR_2']].q =  q_target[11]
-        self.cmd.motorCmd[d['RR_2']].dq = 0
-        self.cmd.motorCmd[d['RR_2']].Kp = Kp
-        self.cmd.motorCmd[d['RR_2']].Kd = Kd
-        self.cmd.motorCmd[d['RR_2']].tau = 0.0
-
-        self.cmd.motorCmd[d['RL_0']].q = q_target[6]
-        self.cmd.motorCmd[d['RL_0']].dq = 0
-        self.cmd.motorCmd[d['RL_0']].Kp = Kp
-        self.cmd.motorCmd[d['RL_0']].Kd = Kd
-        self.cmd.motorCmd[d['RL_0']].tau = -0.65
-
-        self.cmd.motorCmd[d['RL_1']].q = q_target[7]
-        self.cmd.motorCmd[d['RL_1']].dq = 0
-        self.cmd.motorCmd[d['RL_1']].Kp = Kp
-        self.cmd.motorCmd[d['RL_1']].Kd = Kd
-        self.cmd.motorCmd[d['RL_1']].tau = 0.0
-
-        self.cmd.motorCmd[d['RL_2']].q =  q_target[8]
-        self.cmd.motorCmd[d['RL_2']].dq = 0
-        self.cmd.motorCmd[d['RL_2']].Kp = Kp
-        self.cmd.motorCmd[d['RL_2']].Kd = Kd
-        self.cmd.motorCmd[d['RL_2']].tau = 0.0
-
-
-
-
-
-
-
-
-        self.safe.PowerProtect(self.cmd, self.state, 2)
-
-        self.udp.SetSend(self.cmd)
-        self.udp.Send()
-
-
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
@@ -201,22 +111,7 @@ class Go1(VecTask):
         # cam pic
         self.save_cam = self.cfg["task"]["save_cam_pic"]
         self.add_fake_ball = self.cfg["task"]["fake_ball"]
-        self.real = self.cfg["env"]["real_robot"]
 
-        if self.real:
-            self.d = {'FR_0':0, 'FR_1':1, 'FR_2':2,
-                'FL_0':3, 'FL_1':4, 'FL_2':5, 
-                'RR_0':6, 'RR_1':7, 'RR_2':8, 
-                'RL_0':9, 'RL_1':10, 'RL_2':11 }
-            LOWLEVEL  = 0xff
-
-
-            self.udp = sdk.UDP(LOWLEVEL, 8080, "192.168.123.10", 8007)
-            self.safe = sdk.Safety(sdk.LeggedType.Go1)
-            self.cmd = sdk.LowCmd()
-            self.state = sdk.LowState()
-            self.safe.PowerProtect(self.cmd, self.state, 2)
-            self.udp.InitCmdData(self.cmd)
 
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
@@ -225,11 +120,10 @@ class Go1(VecTask):
         self.dof_vel_scale = self.cfg["env"]["learn"]["dofVelocityScale"]
         self.action_scale = self.cfg["env"]["control"]["actionScale"]
 
+
         # reward scales
-        self.rew_scales = {}
-        self.rew_scales["lin_vel_xy"] = self.cfg["env"]["learn"]["linearVelocityXYRewardScale"]
-        self.rew_scales["ang_vel_z"] = self.cfg["env"]["learn"]["angularVelocityZRewardScale"]
-        self.rew_scales["torque"] = self.cfg["env"]["learn"]["torqueRewardScale"]
+        self.reward_scales = self.cfg["env"]["rewards"]["rewardScales"]
+        self.reward_params = self.cfg["env"]["rewards"]["rewardParams"]
 
         # randomization
         self.randomization_params = self.cfg["task"]["randomization_params"]
@@ -267,15 +161,13 @@ class Go1(VecTask):
 
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
+        self._prepare_reward_function()
         # other
         self.dt = self.sim_params.dt
         self.max_episode_length_s = self.cfg["env"]["learn"]["episodeLength_s"]
         self.max_episode_length = int(self.max_episode_length_s / self.dt + 0.5)
         self.Kp = self.cfg["env"]["control"]["stiffness"]
         self.Kd = self.cfg["env"]["control"]["damping"]
-
-        for key in self.rew_scales.keys():
-            self.rew_scales[key] *= self.dt
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]
@@ -284,6 +176,40 @@ class Go1(VecTask):
             cam_target = gymapi.Vec3(lookat[0], lookat[1], lookat[2])
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
 
+        self.get_wrapped_tensor()
+
+        # init curriculum
+        self.curriculum = RewardThresholdCurriculum(seed=42, device=self.device,
+                x_vel=(self.cfg["env"]["randomCommandVelocityRanges"]           ["linear_x"][0],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][1],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_x"]),
+                y_vel=(self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][0],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][1],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_y"]),
+                yaw_vel=(self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][0],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][1],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_yaw"]))
+        
+
+        low = torch.tensor([-0.5, -0.2, -0.1], device=self.device)
+        high = torch.tensor([0.5, 0.2, 0.1], device=self.device)
+
+        self.curriculum.set_to(low,high)
+
+        # self.env_command_bins = np.zeros(self.num_envs, dtype=np.int)
+        _, self.env_command_bins = self.curriculum.sample_bins(self.num_envs)
+
+
+        # calculate for curriculum update
+        self.task_rewards_episode = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.task_rewards_threshold = 5.0
+
+
+
+
+        self.reset_idx(torch.arange(self.num_envs, device=self.device))
+
+    def get_wrapped_tensor(self):
         # get gym state tensors
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
@@ -321,37 +247,7 @@ class Go1(VecTask):
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
 
-        # init curriculum
-        self.curriculum = RewardThresholdCurriculum(seed=42, device=self.device,
-                x_vel=(self.cfg["env"]["randomCommandVelocityRanges"]           ["linear_x"][0],
-                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][1],
-                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_x"]),
-                y_vel=(self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][0],
-                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][1],
-                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_y"]),
-                yaw_vel=(self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][0],
-                        self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][1],
-                        self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_yaw"]))
-        
-
-        low = torch.tensor([-0.5, -0.2, -0.1], device=self.device)
-        high = torch.tensor([0.5, 0.2, 0.1], device=self.device)
-
-        self.curriculum.set_to(low,high)
-
-        # self.env_command_bins = np.zeros(self.num_envs, dtype=np.int)
-        _, self.env_command_bins = self.curriculum.sample_bins(self.num_envs)
-
-        # print("env_command_bins is init as: ", self.env_command_bins)
-        self.task_rewards_episode = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
-        self.task_rewards_threshold = 5.0
-        self.have_plt_curriculum = False
-        self.total_train_step = 0
-
-
-
-
-        self.reset_idx(torch.arange(self.num_envs, device=self.device))
+        self.log_step_counter = 0
 
     def create_sim(self):
         self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
@@ -424,14 +320,7 @@ class Go1(VecTask):
 
         self.a1_handles = []
         self.envs = []
-        if self.add_fake_ball:
-            self.ball_handles = []
 
-        if self.save_cam:
-            self.camera_handles = []
-            if not os.path.exists("a1_images"):
-                os.mkdir("a1_images")
-            self.frame_count = 0
 
         for i in range(self.num_envs):
             # create env instance
@@ -446,28 +335,9 @@ class Go1(VecTask):
             c = 0.5 * np.random.random(3)
             color = gymapi.Vec3(c[0], c[1], c[2])
 
-            if self.add_fake_ball:
-                ball_handle = self.gym.create_actor(env_ptr, asset_ball, start_pose, "ball", i, 0, 1)
-                self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color)
-                self.ball_handles.append(ball_handle)
 
             self.gym.set_rigid_body_color(env_ptr, a1_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color)
 
-
-
-            if self.save_cam:
-                camera_properties = gymapi.CameraProperties()
-                camera_properties.width = 360
-                camera_properties.height = 240
-
-                h2 = self.gym.create_camera_sensor(env_ptr, camera_properties)
-                camera_offset = gymapi.Vec3(1, 0, 0.5)
-                camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.deg2rad(0))
-                body_handle = self.gym.get_actor_rigid_body_handle(env_ptr, a1_handle, 0)
-
-                self.gym.attach_camera_to_body(h2, env_ptr, body_handle, gymapi.Transform(camera_offset, camera_rotation),
-                                          gymapi.FOLLOW_TRANSFORM)
-                self.camera_handles.append(h2)
 
 
         # for i in range(len(feet_names)):
@@ -481,10 +351,6 @@ class Go1(VecTask):
         self.actions = actions.clone().to(self.device)
         targets = self.action_scale * self.actions + self.default_dof_pos
 
-        if self.real:
-            print("==== this time DOF targets",targets[0,:])
-            time.sleep(0.005)
-            self.control_real_12dof(targets, 15., 1)
 
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
 
@@ -495,85 +361,75 @@ class Go1(VecTask):
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
 
+        self.refresh_buffers()
+
         self.compute_observations()
         self.compute_reward(self.actions)
-
-        if self.save_cam:
-            self.frame_count += 1
-
-        if self.save_cam:
-            self.gym.step_graphics(self.sim)
-
-            # render the camera sensors
-            self.gym.render_all_camera_sensors(self.sim)
-            if np.mod(self.frame_count, 1) == 0:
-                i = 2
-                rgb_filename = "a1_images/rgb_env%d_frame%d.png" % (i, self.frame_count)
-                self.gym.write_camera_image_to_file(
-                    self.sim, self.envs[i], self.camera_handles[i], gymapi.IMAGE_COLOR, rgb_filename)
+        # self.wandb_addtional_log()
 
     def compute_reward(self, actions):
-        self.total_train_step += 1
-        # self.rew_buf[:], self.reset_buf[:] = compute_anymal_reward(
-        self.rew_buf[:], self.reset_buf[:], extra_info_to_log = compute_anymal_reward(
-                #
-            # tensors
-            self.root_states[:,:],
-            # if have balls added, this should be [::2,:],
-            # because a1 ball a1 ball ...
-            self.commands,
-            self.torques,
-            self.contact_forces,
-            self.knee_indices,
-            self.progress_buf,
-            # Dict
-            self.rew_scales,
-            # other
-            self.base_index,
-            self.max_episode_length,
-        )
-        self.task_rewards_episode += self.rew_buf
-        self.extras.update(extra_info_to_log)
-        # self.extras["double"] = extra_info_to_log
+        """ Compute rewards
+            Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
+            adds each terms to the episode sums and to the total reward
+        """
+        extra_info = {}
+        episode_cumulative = {}
+        self.rew_buf[:] = 0.
+        for i in range(len(self.reward_functions)):
+            name = self.reward_names[i]
+            rew = self.reward_functions[i]() * self.reward_scales[name]
+            self.rew_buf += rew
+            episode_cumulative[name] = rew
+        
+        extra_info["episode_cumulative"] = episode_cumulative
+        self.extras.update(extra_info)
+
+    def wandb_addtional_log(self):
+        self.log_step_counter += 1
+        if self.log_step_counter % self.add_log_period == 0:
+            self.log_step_counter = 0
+            if wandb.run is not None:
+                wandb.log({"curriculum": plt.imshow(torch.sum(self.curriculum.weights_shaped, axis=2).cpu(), cmap='gray').get_figure()})
+
 
     def compute_observations(self):
-        self.gym.refresh_dof_state_tensor(self.sim)  # done in step
-        self.gym.refresh_actor_root_state_tensor(self.sim)
-        self.gym.refresh_net_contact_force_tensor(self.sim)
-        self.gym.refresh_dof_force_tensor(self.sim)
 
-        root_states = self.root_states[:, :]
-        commands = self.commands
-        dof_pos = self.dof_pos
-        default_dof_pos = self.default_dof_pos
-        dof_vel = self.dof_vel
-        gravity_vec = self.gravity_vec
-        actions = self.actions
         lin_vel_scale = self.lin_vel_scale
         ang_vel_scale = self.ang_vel_scale
         dof_pos_scale = self.dof_pos_scale
         dof_vel_scale = self.dof_vel_scale
 
-        base_quat = root_states[:, 3:7]
-        base_lin_vel = quat_rotate_inverse(base_quat, root_states[:, 7:10]) * lin_vel_scale
-        base_ang_vel = quat_rotate_inverse(base_quat, root_states[:, 10:13]) * ang_vel_scale
-        projected_gravity = quat_rotate_inverse(base_quat, gravity_vec)
-        dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
 
-        commands_scaled = commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=commands.device)
+        dof_pos_scaled = (self.dof_pos - self.default_dof_pos) * dof_pos_scale
+
+        commands_scaled = self.commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=self.commands.device)
 
 
         obs = torch.cat((
             #base_lin_vel,
             #base_ang_vel,
-            projected_gravity,
+            self.projected_gravity,
             commands_scaled,
             dof_pos_scaled,
-            dof_vel * dof_vel_scale,
-            actions,
+            self.dof_vel * dof_vel_scale,
+            self.actions,
         ), dim=-1)
 
         self.obs_buf[:] = obs
+
+    def refresh_buffers(self):
+        self.gym.refresh_dof_state_tensor(self.sim)  # done in step
+        self.gym.refresh_actor_root_state_tensor(self.sim)
+        self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_dof_force_tensor(self.sim)
+
+
+        self.base_state = self.root_states[:, :3]
+        self.base_quat = self.root_states[:, 3:7]
+        self.base_lin_vel = self.root_states[:, 7:10]
+        self.base_ang_vel = self.root_states[:, 10:13]
+
+        self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
 
 
     def reset_idx(self, env_ids):
@@ -587,43 +443,9 @@ class Go1(VecTask):
         self.dof_pos[env_ids] = self.default_dof_pos[env_ids] * positions_offset
         self.dof_vel[env_ids] = velocities
 
-        batch_size = len(env_ids)
         
-        if batch_size != 0: 
-
-            old_bins = self.env_command_bins[env_ids]
-            # print("old_bins_is",old_bins)
-
-            self.curriculum.update(old_bins, [self.task_rewards_episode[env_ids]], [self.task_rewards_threshold],
-                                  local_range=torch.tensor(
-                                      [0.6,0.3,0.3], device=self.device))
-            
-            if self.total_train_step % (50 * 24) == 0 and not self.have_plt_curriculum:
-                self.have_plt_curriculum = True
-                print("plotting curriculum size", self.curriculum.weights_shaped.shape)
-
-                if wandb.run is not None:
-                    wandb.log({"curriculum": plt.imshow(torch.sum(self.curriculum.weights_shaped, axis=2).cpu(), cmap='gray').get_figure()})
-                # self.extras.update({"curriculum": plt.imshow(np.sum(self.curriculum.weights_shaped, axis=2), cmap='gray').get_figure()})
-            else:
-                self.have_plt_curriculum = False
-                # self.extras.update({"curriculum": None})
-            
-
-            new_commands, new_bin_inds = self.curriculum.sample(batch_size=batch_size)
-            self.env_command_bins[env_ids] = new_bin_inds
-            self.commands[env_ids, :] = torch.tensor(new_commands[:, :]).to(self.device)
-
-
-
-        # self.commands_x[env_ids] = torch_rand_float(self.command_x_range[0], self.command_x_range[1], (len(env_ids), 1), device=self.device).squeeze()
-        # self.commands_y[env_ids] = torch_rand_float(self.command_y_range[0], self.command_y_range[1], (len(env_ids), 1), device=self.device).squeeze()
-        # self.commands_yaw[env_ids] = torch_rand_float(self.command_yaw_range[0], self.command_yaw_range[1], (len(env_ids), 1), device=self.device).squeeze()
-
-        if self.add_fake_ball:
-            ball_states = self.initial_root_states.clone()
-            ball_states[1::2, 0] = self.commands_x * 4
-            ball_states[1::2, 1] = self.commands_y * 4
+        if len(env_ids) != 0: 
+            self.update_curri(env_ids)
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
 
@@ -632,31 +454,71 @@ class Go1(VecTask):
                                                          gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
 
-        # TODO: need debug here!!!
-        # dof_tensor = self.gym.acquire_dof_state_tensor(self.sim)
-        #
-        # print("Gym dof tensor shape:", dof_tensor.shape)
-        # print("Gym dof tensor data @ 0x%x" % dof_tensor.data_address)
-        #
-        # # wrap physics state tensor in a pytorch tensor
-        # dof_torch_tensor = gymtorch.wrap_tensor(dof_tensor)
-        # print("Torch state tensor device:", dof_torch_tensor.device)
-        # print("Torch state tensor shape:", dof_torch_tensor.shape)
-        # print("Torch state tensor data @ 0x%x" % dof_torch_tensor.data_ptr())
-        #
-        # print("self state tensor shape:", self.dof_state.shape)
-
-        # self.gym.set_dof_state_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_state))
         self.gym.set_dof_state_tensor_indexed(self.sim,
                                                gymtorch.unwrap_tensor(self.dof_state),
                                                gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
-        # print("shape",(len(env_ids), 1))
-        # print("self device now ::", self.device)
-        # print(torch.rand(1024,1, device=self.device))
+
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         self.task_rewards_episode[env_ids] = 0
+
+    def update_curri(self, env_ids):
+        old_bins = self.env_command_bins[env_ids]
+            # print("old_bins_is",old_bins)
+
+        self.curriculum.update(old_bins, [self.task_rewards_episode[env_ids]], [self.task_rewards_threshold],
+                                  local_range=torch.tensor(
+                                      [0.6,0.3,0.3], device=self.device))
+
+        new_commands, new_bin_inds = self.curriculum.sample(batch_size=len(env_ids))
+        self.env_command_bins[env_ids] = new_bin_inds
+        self.commands[env_ids, :] = torch.tensor(new_commands[:, :]).to(self.device)
+
+    def _prepare_reward_function(self):
+        """ Prepares a list of reward functions, whcih will be called to compute the total reward.
+            Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.
+        """
+        # reward containers
+        from isaacgymenvs.tasks.go1func.walk_rewards import RewardTerms
+        self.reward_container = RewardTerms(self)
+
+        # remove zero scales + multiply non-zero ones by dt
+        for key in list(self.reward_scales.keys()):
+            scale = self.reward_scales[key]
+            if scale == 0:
+                self.reward_scales.pop(key)
+            else:
+                self.reward_scales[key] *= self.dt
+        # prepare list of functions
+        self.reward_functions = []
+        self.reward_names = []
+        for name, scale in self.reward_scales.items():
+            if name == "termination":
+                continue
+
+            if not hasattr(self.reward_container, '_reward_' + name):
+                print(f"Warning: reward {'_reward_' + name} has nonzero coefficient but was not found!")
+            else:
+                self.reward_names.append(name)
+                self.reward_functions.append(getattr(self.reward_container, '_reward_' + name))
+
+        # reward episode sums
+        # self.episode_sums = {
+        #     name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        #     for name in self.reward_scales.keys()}
+        # self.episode_sums["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+        #                                          requires_grad=False)
+        # self.episode_sums_eval = {
+        #     name: -1 * torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        #     for name in self.reward_scales.keys()}
+        # self.episode_sums_eval["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+        #                                               requires_grad=False)
+        # self.command_sums = {
+        #     name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        #     for name in
+        #     list(self.reward_scales.keys()) + ["lin_vel_raw", "ang_vel_raw", "lin_vel_residual", "ang_vel_residual",
+        #                                        "ep_timesteps"]}
 
 
 #####################################################################

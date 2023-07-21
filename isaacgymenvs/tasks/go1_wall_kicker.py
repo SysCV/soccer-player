@@ -248,6 +248,7 @@ class Go1WallKicker(VecTask):
 
     def create_self_buffers(self):
         # initialize some data used later on
+        # the differce with monitor is that these are not wrapped gym-state tensors
         self.extras = {}
 
         self.commands = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)

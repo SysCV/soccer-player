@@ -47,7 +47,7 @@ env:
     stiffness: 20.0  # [N*m/rad]
     damping: 0.5     # [N*m*s/rad]
     actionScale: 0.5
-    controlFrequencyInv: 1 # 60 Hz
+    controlFrequencyInv: 1 # control step every dt
     # todo: change to a1 param?
 
   defaultJointAngles:  # = target angles when action = 0.0
@@ -84,12 +84,23 @@ env:
 
 
 # for a1
-
-
   urdfAsset:
     collapseFixedJoints: True
     fixBaseLink: False
     defaultDofDriveMode: 4 # see GymDofDriveModeFlags (0 is none, 1 is pos tgt, 2 is vel tgt, 4 effort)
+
+  rewards:
+    rewardScales:
+      tracking_lin_vel: 1.0
+      tracking_ang_vel: 0.5
+      torque: -0.00001
+
+
+    rewardParams:
+      tracking_lin_vel:
+        sigma: 0.25
+      tracking_ang_vel:
+        sigma: 0.25
 
   learn:
     # rewards
