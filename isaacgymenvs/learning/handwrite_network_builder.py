@@ -49,7 +49,6 @@ class PixelA2CBuilder(network_builder.NetworkBuilder):
             actions_num = kwargs.pop('actions_num')
             input_shape = kwargs.pop('input_shape')
             privilaged_input_shape = kwargs.pop('privilaged_input_shape', None)
-            image_nums = kwargs.pop('image_nums', 4)
             self.value_size = kwargs.pop('value_size', 1)
             self.num_seqs = num_seqs = kwargs.pop('num_seqs', 1)
             network_builder.NetworkBuilder.BaseNetwork.__init__(self)
@@ -62,7 +61,7 @@ class PixelA2CBuilder(network_builder.NetworkBuilder):
             self.feature_encoder = nn.Sequential()
 
             self.image_feature = _build_resnet18_feature()
-            self.feature_encoder = build_conv_mlp(4, [256, 128], 64)
+            self.feature_encoder = build_conv_mlp(1, [256, 128], 64)
             
             if self.has_cnn:
                 if self.permute_input:
@@ -182,10 +181,10 @@ class PixelA2CBuilder(network_builder.NetworkBuilder):
                     obs = obs.permute((0, 3, 1, 2))
 
             # handle image tensors
-            resnet_out = self.image_feature(image_tensors.view(-1,224,224,3).permute((0, 3, 1, 2))) # (B x 4, 512, 1, 1) .float()?
+            resnet_out = self.image_feature(image_tensors.view(-1,224,224,3).permute((0, 3, 1, 2))) # (B, 512, 1, 1) .float()?
 
-            resnet_out = resnet_out.squeeze().view(-1,4,512) # (B, 4, 512)
-            image_obs = self.feature_encoder(resnet_out.squeeze()) # (B, 64)
+            resnet_out = resnet_out.squeeze().view(-1,1,512) # (B, 4, 512)
+            image_obs = self.feature_encoder(resnet_out) # (B, 64)
             # print("image_obs", image_obs.shape)
             image_obs = image_obs.squeeze()
             obs_cat_list= []

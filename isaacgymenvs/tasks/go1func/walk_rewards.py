@@ -23,7 +23,42 @@ class RewardTerms:
 
     def _reward_torque(self):
         rew_torque = torch.sum(torch.square(self.env.torques), dim=1)
-        return - rew_torque
+        return rew_torque
+    
+    def _reward_orientation(self):
+        # Penalize non flat base orientation
+        return torch.sum(torch.square(self.env.projected_gravity[:, :2]), dim=1)
+    
+    def _reward_action_rate(self):
+        # Penalize changes in actions
+        return torch.sum(torch.square(self.env.last_actions - self.env.actions), dim=1)
+    
+    def _reward_action_smoothness_1(self):
+        # Penalize changes in actions
+        diff = torch.square(self.env.last_actions - self.env.actions)
+        diff = diff * (self.env.last_actions != 0)  # ignore first step
+        return torch.sum(diff, dim=1)
+
+    def _reward_action_smoothness_2(self):
+        # Penalize changes in actions
+        diff = torch.square(self.env.actions - 2 * self.env.last_actions + self.env.last_last_actions)
+        diff = diff * (self.env.last_actions != 0)  # ignore first step
+        diff = diff * (self.env.last_last_actions != 0)  # ignore second step
+        return torch.sum(diff, dim=1)
+
+    
+    def _reward_dof_pos(self):
+        # Penalize dof positions
+        return torch.sum(torch.square(self.env.dof_pos - self.env.default_dof_pos), dim=1)
+    
+    def _reward_dof_vel(self):
+        # Penalize dof velocities
+        return torch.sum(torch.square(self.env.dof_vel), dim=1)
+    
+    def _reward_base_height(self):
+        # Penalize base height
+        return torch.square(self.env.base_pos[:, 2] - self.env.reward_params["base_height"]["target"])
+    
 
     
 

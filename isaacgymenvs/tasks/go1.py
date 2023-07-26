@@ -108,9 +108,8 @@ class Go1(VecTask):
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
 
         self.cfg = cfg
-        # cam pic
-        self.save_cam = self.cfg["task"]["save_cam_pic"]
-        self.add_fake_ball = self.cfg["task"]["fake_ball"]
+        self.wandb_extra_log = self.cfg["env"]["wandb_extra_log"]
+        self.wandb_log_period = self.cfg["env"]["wandb_extra_log_period"]
 
 
         # normalization
@@ -122,6 +121,8 @@ class Go1(VecTask):
 
 
         # reward scales
+        self.postive_reward_ji22 = self.cfg["env"]["rewards"]["only_positive_rewards_ji22_style"]
+        self.sigma_rew_neg = self.cfg["env"]["rewards"]["sigma_rew_neg"]
         self.reward_scales = self.cfg["env"]["rewards"]["rewardScales"]
         self.reward_params = self.cfg["env"]["rewards"]["rewardParams"]
 
@@ -162,6 +163,7 @@ class Go1(VecTask):
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
         self._prepare_reward_function()
+
         # other
         self.dt = self.sim_params.dt
         self.max_episode_length_s = self.cfg["env"]["learn"]["episodeLength_s"]
@@ -178,6 +180,11 @@ class Go1(VecTask):
 
         self.get_wrapped_tensor()
 
+        self.init_curriculum()
+
+        self.reset_idx(torch.arange(self.num_envs, device=self.device))
+
+    def init_curriculum(self):
         # init curriculum
         self.curriculum = RewardThresholdCurriculum(seed=42, device=self.device,
                 x_vel=(self.cfg["env"]["randomCommandVelocityRanges"]           ["linear_x"][0],
@@ -202,12 +209,7 @@ class Go1(VecTask):
 
         # calculate for curriculum update
         self.task_rewards_episode = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
-        self.task_rewards_threshold = 5.0
-
-
-
-
-        self.reset_idx(torch.arange(self.num_envs, device=self.device))
+        self.task_rewards_threshold = 10.0
 
     def get_wrapped_tensor(self):
         # get gym state tensors
@@ -246,8 +248,14 @@ class Go1(VecTask):
         self.initial_root_states[:] = to_torch(self.base_init_state, device=self.device, requires_grad=False)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.last_last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
 
-        self.log_step_counter = 0
+        self.rew_pos = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+        self.rew_neg = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+
+        if self.wandb_extra_log:
+            self.log_step_counter = 0
 
     def create_sim(self):
         self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
@@ -314,9 +322,6 @@ class Go1(VecTask):
         env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
 
-        asset_options = gymapi.AssetOptions()
-        asset_options.density = 1.
-        asset_ball = self.gym.create_sphere(self.sim, 0.1, asset_options)
 
         self.a1_handles = []
         self.envs = []
@@ -326,6 +331,11 @@ class Go1(VecTask):
             # create env instance
             env_ptr = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
             a1_handle = self.gym.create_actor(env_ptr, a1, start_pose, "a1", i, 0, 0)
+
+            # if i==0:
+            #     for j in range(len(body_names)):
+            #         print("mass: ", j, body_names[j] , self.gym.get_actor_rigid_body_properties(env_ptr, 0)[j].mass)
+
 
             self.gym.set_actor_dof_properties(env_ptr, a1_handle, dof_props)
             self.gym.enable_actor_dof_force_sensors(env_ptr, a1_handle)
@@ -348,7 +358,10 @@ class Go1(VecTask):
         self.base_index = self.gym.find_actor_rigid_body_handle(self.envs[0], self.a1_handles[0], "base")
 
     def pre_physics_step(self, actions):
+        self.last_last_actions = self.last_actions.clone()
+        self.last_actions = self.actions.clone()
         self.actions = actions.clone().to(self.device)
+
         targets = self.action_scale * self.actions + self.default_dof_pos
 
 
@@ -363,6 +376,9 @@ class Go1(VecTask):
 
         self.refresh_buffers()
 
+        if wandb.run is not None and self.wandb_extra_log:
+            self.wandb_addtional_log()
+        self.compute_reset()
         self.compute_observations()
         self.compute_reward(self.actions)
         # self.wandb_addtional_log()
@@ -375,21 +391,32 @@ class Go1(VecTask):
         extra_info = {}
         episode_cumulative = {}
         self.rew_buf[:] = 0.
+        self.rew_pos[:] = 0.
+        self.rew_neg[:] = 0.
         for i in range(len(self.reward_functions)):
             name = self.reward_names[i]
             rew = self.reward_functions[i]() * self.reward_scales[name]
-            self.rew_buf += rew
+            if torch.sum(rew) >= 0:
+                self.rew_pos += rew
+            elif torch.sum(rew) <= 0:
+                self.rew_neg += rew
             episode_cumulative[name] = rew
         
+
+        if self.postive_reward_ji22:
+            self.rew_buf[:] = self.rew_pos[:] * torch.exp(self.rew_neg[:] / self.sigma_rew_neg)
+        else:
+            self.rew_buf = self.rew_pos + self.rew_neg
+        self.task_rewards_episode += self.rew_buf
         extra_info["episode_cumulative"] = episode_cumulative
         self.extras.update(extra_info)
 
     def wandb_addtional_log(self):
-        self.log_step_counter += 1
-        if self.log_step_counter % self.add_log_period == 0:
+        if self.log_step_counter % self.wandb_log_period == 0:
             self.log_step_counter = 0
             if wandb.run is not None:
                 wandb.log({"curriculum": plt.imshow(torch.sum(self.curriculum.weights_shaped, axis=2).cpu(), cmap='gray').get_figure()})
+        self.log_step_counter += 1
 
 
     def compute_observations(self):
@@ -424,12 +451,22 @@ class Go1(VecTask):
         self.gym.refresh_dof_force_tensor(self.sim)
 
 
-        self.base_state = self.root_states[:, :3]
+        self.base_pos = self.root_states[:, :3]
         self.base_quat = self.root_states[:, 3:7]
         self.base_lin_vel = self.root_states[:, 7:10]
         self.base_ang_vel = self.root_states[:, 10:13]
 
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+
+    def compute_reset(self):
+        # reset agents
+        reset = torch.norm(self.contact_forces[:, self.base_index, :], dim=1) > 1.
+        reset = reset | torch.any(torch.norm(self.contact_forces[:, self.knee_indices, :], dim=2) > 1., dim=1)
+        time_out = self.progress_buf >= self.max_episode_length - 1
+        # reward for time-outs
+        reset = reset | time_out
+        
+        self.reset_buf[:] = reset
 
 
     def reset_idx(self, env_ids):

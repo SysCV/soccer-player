@@ -100,7 +100,7 @@ class RewardTerms:
 
 
         bonus_index = (ball_goal_distance_error < self.env.reward_params["hit_wall_and_switch"]["valid_success_range"]**2) & reward_index
-        reward_hit[bonus_index] += self.env.reward_params["hit_wall_and_switch"]["success_bonus_scale"] / self.env.rebound_times[bonus_index]
+        reward_hit[bonus_index] += self.env.reward_params["hit_wall_and_switch"]["success_bonus_scale"] / 1 + self.env.reward_params["hit_wall_and_switch"]["hit_times_penalty"] * self.env.rebound_times[bonus_index]
 
         self.env.is_back[reward_index] = True
         self.env.rebound_times[reward_index] += 1

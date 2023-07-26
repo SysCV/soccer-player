@@ -263,8 +263,8 @@ class Go1Real(VecTask):
             (self.num_envs, self.num_states), device=self.device, dtype=torch.float)
         self.rew_buf = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.float)
-        self.reset_buf = torch.ones(
-            self.num_envs, device=self.device, dtype=torch.long)
+        self.reset_buf = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long) # in real, never reset
         self.timeout_buf = torch.zeros(
              self.num_envs, device=self.device, dtype=torch.long)
         self.progress_buf = torch.zeros(
@@ -312,9 +312,6 @@ class Go1Real(VecTask):
                 if isinstance(agent.cfg, dict):
                     hip_reduction = 1.0
                     action_scale = agent.cfg["env"]["control"]["actionScale"]
-                else:
-                    hip_reduction = agent.cfg.control.hip_scale_reduction
-                    action_scale = agent.cfg.control.action_scale
 
                 next_target[[0, 3, 6, 9]] /= hip_reduction
                 next_target = next_target / action_scale
@@ -409,7 +406,7 @@ class Go1Real(VecTask):
         commands = obs[:,3:6]
         dof_pos = obs[:,6:18]
         dof_vel = obs[:,18:30]
-        actions = obs[:,30:42]
+        # actions = obs[:,30:42] # actions are not used in real robot
 
         lin_vel_scale = self.lin_vel_scale
         ang_vel_scale = self.ang_vel_scale
@@ -430,7 +427,7 @@ class Go1Real(VecTask):
             commands_scaled,
             dof_pos_scaled,
             dof_vel_scaled,
-            actions,
+            self.actions,
         ), dim=-1)
 
         self.obs_buf[:] = obs
