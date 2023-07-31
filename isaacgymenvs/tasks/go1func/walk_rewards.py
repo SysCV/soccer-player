@@ -59,6 +59,18 @@ class RewardTerms:
         # Penalize base height
         return torch.square(self.env.base_pos[:, 2] - self.env.reward_params["base_height"]["target"])
     
+    def _reward_feet_air_time(self):
+        # Reward long steps
+        # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
+        first_contact = (self.env.feet_air_time > 0.) * self.env.contact_state
+        rew_airTime = torch.sum((self.env.feet_air_time - self.env.reward_params["feet_air_time"]["baseline"]) * first_contact, dim=1) # reward only on first contact with the ground
+        self.env.feet_air_time *= self.env.contact_state
+        return rew_airTime
+    
+    def _reward_lin_vel_z(self):
+        # Reward forward velocity
+        return torch.square(self.env.base_lin_vel[:, 2])
+    
 
     
 

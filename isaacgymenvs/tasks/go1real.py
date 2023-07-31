@@ -158,6 +158,7 @@ class Go1Real(VecTask):
         self.dof_pos_scale = self.cfg["env"]["learn"]["dofPositionScale"]
         self.dof_vel_scale = self.cfg["env"]["learn"]["dofVelocityScale"]
         self.action_scale = self.cfg["env"]["control"]["actionScale"]
+        self.hip_addtional_scale = self.cfg["env"]["control"]["hipAddtionalScale"]
 
         # reward scales
         self.rew_scales = {}
@@ -338,9 +339,12 @@ class Go1Real(VecTask):
     def pre_physics_step(self, actions):
         self.time = time.time()
         self.actions = actions.clone().to(self.device)
-        targets = self.action_scale * self.actions
+        # self.actions[:,0:3] = 0.
 
-        self.agents["hardware_closed_loop"].publish_action(targets, hard_reset=False)
+        # actions_scaled = self.actions[:, :12] * self.action_scale
+        # actions_scaled[:, [0, 3, 6, 9]] *= self.hip_addtional_scale
+        # targets = actions_scaled
+        self.agents["hardware_closed_loop"].publish_action(self.actions, hard_reset=False) # default pos will be added inside the agent
 
         time.sleep(max(self.dt - (time.time() - self.time), 0))
         if self.timestep % 100 == 0: print(f'frq: {1 / (time.time() - self.time)} Hz');
@@ -406,7 +410,11 @@ class Go1Real(VecTask):
         commands = obs[:,3:6]
         dof_pos = obs[:,6:18]
         dof_vel = obs[:,18:30]
-        # actions = obs[:,30:42] # actions are not used in real robot
+        actions = obs[:,30:42] # actions are not used in real robot
+        contact_states = obs[:,42:46]
+
+        # print("=== gravity_vec: ", gravity_vec)
+        # print("=== contact_states: ", contact_states)
 
         lin_vel_scale = self.lin_vel_scale
         ang_vel_scale = self.ang_vel_scale
@@ -427,7 +435,8 @@ class Go1Real(VecTask):
             commands_scaled,
             dof_pos_scaled,
             dof_vel_scaled,
-            self.actions,
+            actions,
+            contact_states
         ), dim=-1)
 
         self.obs_buf[:] = obs

@@ -8,6 +8,7 @@ env:
   numEnvs: 1
   envSpacing: 2.  # [m]
 
+  observe_contact_states: True
   obs_num:
     # base_v: 3
     # base_w: 3
@@ -16,6 +17,7 @@ env:
     dof_p: 12
     dof_v: 12
     pre_act: 12
+    contact_state: 4
 
   act_num: 12
 
@@ -48,6 +50,7 @@ env:
     damping: 0.5     # [N*m*s/rad]
     actionScale: 0.5
     controlFrequencyInv: 1 # 60 Hz
+    hipAddtionalScale: 0.5
     # todo: change to a1 param?
 
   defaultJointAngles:  # = target angles when action = 0.0
