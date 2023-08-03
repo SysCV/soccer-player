@@ -10,10 +10,12 @@ env:
   wandb_extra_log: True
   wandb_extra_log_period: 1000
 
+  obs_history: true
+  history_length: 30
 
-  action_lag_step: 6
+  action_lag_step: 0
 
-  observe_contact_states: True
+  observe_contact_states: false
   obs_num:
     # base_v: 3
     # base_w: 3
@@ -22,7 +24,7 @@ env:
     dof_p: 12
     dof_v: 12
     pre_act: 12
-    contact_state: 4
+    # contact_state: 4
 
   act_num: 12
 

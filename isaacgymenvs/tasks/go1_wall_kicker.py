@@ -109,6 +109,7 @@ class Go1WallKicker(VecTask):
         # cam pic
         self.have_cam_window = self.cfg["env"]["cameraSensorPlt"]
         self.pixel_obs = self.cfg["env"]["pixel_observations"]["enable"]
+        self.state_obs = self.cfg["env"]["state_obs"]
         # print("pixel_obs:", self.pixel_obs)
         if self.have_cam_window:
             _, self.ax = plt.subplots()
@@ -190,6 +191,10 @@ class Go1WallKicker(VecTask):
         if self.pixel_obs:
             self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf),
                                      "pixel_obs":spaces.Box(low=0, high=255, shape=(224, 224, 3), dtype=np.uint8),
+                                    })
+            
+        if self.state_obs:
+            self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
                                     })
 
         # other
@@ -410,9 +415,11 @@ class Go1WallKicker(VecTask):
 
             if self.pixel_obs:
                 color = gymapi.Vec3(1, 0, 0)
+                color_goal = gymapi.Vec3(0, 1, 0)
             else:
                 c = 0.7 * np.random.random(3)
                 color = gymapi.Vec3(c[0], c[1], c[2])
+                color_goal = gymapi.Vec3(c[0], c[1], c[2])
 
 
             
@@ -435,7 +442,7 @@ class Go1WallKicker(VecTask):
                 # set boxed marker for each env
                 goal_handle = self.gym.create_actor(env_ptr, goal_asset, gymapi.Transform(gymapi.Vec3(*self.goal_init_pos)), "box", i, 0b111, 1) # can be asset box
 
-                self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color)
+                self.gym.set_rigid_body_color(env_ptr, goal_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color_goal)
                 self.goal_handles.append(goal_handle)
 
                 # set wall for each env
@@ -554,7 +561,11 @@ class Go1WallKicker(VecTask):
                 "pixel_obs":
                 self.camera_tensor_imgs_buf.to(self.rl_device)
             }
-
+        elif self.state_obs:
+            self.obs_dict["obs"] = {
+            "state_obs":
+            torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+            }
         else:
             self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
@@ -730,12 +741,12 @@ class Go1WallKicker(VecTask):
         projected_gravity = quat_rotate_inverse(base_quat, gravity_vec)
         dof_pos_scaled = (dof_pos - default_dof_pos) * dof_pos_scale
 
-        commands_scaled = root_states[2::4, 0:3] * torch.tensor(
-            [lin_vel_scale] * 3,
-            requires_grad=False,
-            device=commands.device
-        )
-
+        # commands_scaled = root_states[2::4, 0:3] * torch.tensor(
+        #     [lin_vel_scale] * 3,
+        #     requires_grad=False,
+        #     device=commands.device
+        # )
+        goal_p = root_states[2::4, 0:3] - root_states[0::4, 0:3]
         ball_states_p = root_states[1::4, 0:3] - root_states[0::4, 0:3]
         ball_states_v = root_states[1::4, 7:10]
 
@@ -748,24 +759,31 @@ class Go1WallKicker(VecTask):
         if "projected_gravity" in self.cfg["env"]["state_observations"]:
             cat_list.append(projected_gravity)
         
-        if "commands" in self.cfg["env"]["state_observations"]:
-            cat_list.append(commands_scaled)
 
         if "dof_pos" in self.cfg["env"]["state_observations"]:
+            # print("dof_pos:",dof_pos_scaled)
             cat_list.append(dof_pos_scaled)
         if "dof_vel" in self.cfg["env"]["state_observations"]:
+            # print("dof_vel:",dof_vel * dof_vel_scale)
             cat_list.append(dof_vel * dof_vel_scale)
         if "last_actions" in self.cfg["env"]["state_observations"]:
+            # print("last_actions:",actions)
             cat_list.append(actions)
 
         if "ball_states_p" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_p)
         if "ball_states_v" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_v)
+
+        if "goal_pose" in self.cfg["env"]["state_observations"]:
+            cat_list.append(goal_p)
         if "base_pose" in self.cfg["env"]["state_observations"]:
             cat_list.append(base_pose)
         if "base_quat" in self.cfg["env"]["state_observations"]:
             cat_list.append(base_quat)
+
+
+        # print(cat_list)
         
         obs = torch.cat(cat_list, dim=-1)
 
@@ -868,7 +886,11 @@ class Go1WallKicker(VecTask):
                 "pixel_obs":
                 self.camera_tensor_imgs_buf.to(self.rl_device)
             }
-
+        elif self.state_obs:
+            self.obs_dict["obs"] = {
+            "state_obs":
+            torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+            }
         else:
             self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 

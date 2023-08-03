@@ -5,13 +5,14 @@ physics_engine: ${..physics_engine}
 
 env:
 
-  numEnvs: ${resolve_default:4000,${...num_envs}}
+  numEnvs: ${resolve_default:20,${...num_envs}}
   envSpacing: 2.  # [m]
 
   cameraSensorPlt: false
 
+  state_obs: False
   state_observations:
-    base_lin_vel: 3
+    # base_lin_vel: 3
     base_ang_vel: 3
     projected_gravity: 3
 
@@ -20,13 +21,13 @@ env:
     last_actions: 12
 
     ball_states_p: 3
-    ball_states_v: 3
-    # goal_pose: 3
+    # ball_states_v: 3
+    goal_pose: 3
     base_pose: 3 
     base_quat: 4
 
   pixel_observations:
-    enable: false
+    enable: true
     width: 224
     height: 224
     cam_range: 130
@@ -60,14 +61,14 @@ env:
     restitution: 0.9       # [-]
 
   baseInitState:
-    pos: [0.0, 0.0, 0.30] # x,y,z [m]
+    pos: [0.0, 0.0, 0.34] # x,y,z [m]
     rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   goalInitState:
     pos: [ 3.0, 0.0, 0.15 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 0.0, 0.0]
+    randomPosRange: [ 0.0, 0., 0.0]
 
   wallInitState:
     pos: [ 3.01, 0.0, 0.5 ] # x,y,z [m]

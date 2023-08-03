@@ -347,7 +347,9 @@ class Go1Real(VecTask):
         self.agents["hardware_closed_loop"].publish_action(self.actions, hard_reset=False) # default pos will be added inside the agent
 
         time.sleep(max(self.dt - (time.time() - self.time), 0))
-        if self.timestep % 100 == 0: print(f'frq: {1 / (time.time() - self.time)} Hz');
+        if self.control_steps % 100 == 0: 
+            print(f'frq: {1 / (time.time() - self.time)} Hz', end=' ')
+            print(f'control_steps: {self.control_steps}')
         self.time = time.time()
 
     def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
@@ -411,6 +413,7 @@ class Go1Real(VecTask):
         dof_pos = obs[:,6:18]
         dof_vel = obs[:,18:30]
         actions = obs[:,30:42] # actions are not used in real robot
+        # print("=== actions: ", actions)
         contact_states = obs[:,42:46]
 
         # print("=== gravity_vec: ", gravity_vec)
@@ -436,6 +439,7 @@ class Go1Real(VecTask):
             dof_pos_scaled,
             dof_vel_scaled,
             actions,
+            # self.actions,
             contact_states
         ), dim=-1)
 

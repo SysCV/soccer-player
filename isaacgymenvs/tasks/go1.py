@@ -89,6 +89,8 @@ from matplotlib import pyplot as plt
 import os
 import torch
 
+from gym import spaces
+
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym.torch_utils import *
@@ -96,7 +98,7 @@ from isaacgym.torch_utils import *
 from isaacgymenvs.tasks.base.vec_task import VecTask
 from isaacgymenvs.tasks.curricula.curriculum_torch import RewardThresholdCurriculum
 
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Any
 
 import sys
 import time
@@ -157,11 +159,21 @@ class Go1(VecTask):
         total_obs_dim = 0
         for val in obs_space_dict.values():
             total_obs_dim += val
+
+        self.obs_history = self.cfg["env"]["obs_history"]
+        self.history_length = self.cfg["env"]["history_length"]
+        
         self.cfg["env"]["numObservations"] = total_obs_dim 
     
         self.cfg["env"]["numActions"] = self.cfg["env"]["act_num"] 
 
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
+
+        # rewrite obs space
+        if self.obs_history:
+            self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf),
+                                     "state_history":spaces.Box(np.ones(self.num_obs*self.history_length) * -np.Inf, np.ones(self.num_obs*self.history_length) * np.Inf),
+                                    })
 
         self._prepare_reward_function()
 
@@ -245,6 +257,13 @@ class Go1(VecTask):
         self.commands_x = self.commands.view(self.num_envs, 3)[..., 0]
         self.commands_yaw = self.commands.view(self.num_envs, 3)[..., 2]
         self.default_dof_pos = torch.zeros_like(self.dof_pos, dtype=torch.float, device=self.device, requires_grad=False)
+
+        if self.obs_history:
+            assert self.num_obs == 42, "total_obs_dim should be 42"
+            zero_obs = torch.zeros(42, dtype=torch.float32, device=self.device)
+            zero_obs[2] = -1 # default gravity
+            self.history_per_begin = torch.tile(zero_obs, (self.history_length,))
+            self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs,1))
     
 
         self.lag_buffer = [torch.zeros_like(self.dof_pos) for i in range(self.cfg["env"]["action_lag_step"]+1)]
@@ -386,6 +405,60 @@ class Go1(VecTask):
 
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
 
+    def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """Step the physics of the environment.
+
+        Args:
+            actions: actions to apply
+        Returns:
+            Observations, rewards, resets, info
+            Observations are dict of observations (currently only one member called 'obs')
+        """
+
+        # randomize actions
+        if self.dr_randomizations.get('actions', None):
+            actions = self.dr_randomizations['actions']['noise_lambda'](actions)
+
+        action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
+        # apply actions
+        self.pre_physics_step(action_tensor)
+
+        # step physics and render each frame
+        for i in range(self.control_freq_inv):
+            if self.force_render:
+                self.render()
+            self.gym.simulate(self.sim)
+
+        # to fix!
+        if self.device == 'cpu':
+            self.gym.fetch_results(self.sim, True)
+
+        # compute observations, rewards, resets, ...
+        self.post_physics_step()
+
+        self.control_steps += 1
+
+        # fill time out buffer: set to 1 if we reached the max episode length AND the reset buffer is 1. Timeout == 1 makes sense only if the reset buffer is 1.
+        self.timeout_buf = (self.progress_buf >= self.max_episode_length - 1) & (self.reset_buf != 0)
+
+        # randomize observations
+        if self.dr_randomizations.get('observations', None):
+            self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](self.obs_buf)
+
+        self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
+
+        if self.obs_history:
+            self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device),
+                                    "state_history":torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)}
+        else:
+            self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        # asymmetric actor-critic
+        if self.num_states > 0:
+            self.obs_dict["states"] = self.get_state()
+
+        return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
+
     def post_physics_step(self):
         self.progress_buf += 1
 
@@ -469,10 +542,10 @@ class Go1(VecTask):
             dof_pos_scaled,
             self.dof_vel * dof_vel_scale,
             self.actions,
-            self.contact_state
         ), dim=-1)
 
         self.obs_buf[:] = obs
+        self.history_buffer[:] = torch.cat((obs, self.history_buffer[:, self.num_obs:]), dim=1)
 
     def refresh_buffers(self):
         self.gym.refresh_dof_state_tensor(self.sim)  # done in step
@@ -509,7 +582,7 @@ class Go1(VecTask):
 
         new_commands, new_bin_inds = self.curriculum.sample(batch_size=len(env_ids))
         self.env_command_bins[env_ids] = new_bin_inds
-        self.commands[env_ids, :] = torch.tensor(new_commands[:, :]).to(self.device)
+        self.commands[env_ids] = new_commands[:, :].to(self.device)
         self.task_rewards_for_curri[env_ids] = 0
         
 
@@ -522,8 +595,8 @@ class Go1(VecTask):
         positions_offset = torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
         velocities = torch_rand_float(-0.1, 0.1, (len(env_ids), self.num_dof), device=self.device)
 
-        self.dof_pos[env_ids] = self.default_dof_pos[env_ids] * positions_offset
-        self.dof_vel[env_ids] = velocities
+        self.dof_pos[env_ids,:] = self.default_dof_pos[env_ids] * positions_offset
+        self.dof_vel[env_ids,:] = velocities
 
 
 
@@ -543,9 +616,31 @@ class Go1(VecTask):
         self.reset_buf[env_ids] = 1
         self.last_actions[env_ids] = 0.
         self.last_last_actions[env_ids] = 0.
+        self.history_buffer[env_ids,:] = torch.tile(self.history_per_begin, (len(env_ids), 1))
         
         for i in range(len(self.lag_buffer)):
             self.lag_buffer[i][env_ids, :] = 0
+
+    def reset(self):
+        """Is called only once when environment starts to provide the first observations.
+        Doesn't calculate observations. Actual reset and observation calculation need to be implemented by user.
+        Returns:
+            Observation dictionary
+        """
+
+        self.obs_buf[:,2] = -1
+
+        if self.obs_history:
+            self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device),
+                                    "state_history":torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)}
+        else:
+            self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        # asymmetric actor-critic
+        if self.num_states > 0:
+            self.obs_dict["states"] = self.get_state()
+
+        return self.obs_dict
 
 
 
