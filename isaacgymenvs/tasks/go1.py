@@ -112,7 +112,7 @@ class Go1(VecTask):
         self.cfg = cfg
         self.wandb_extra_log = self.cfg["env"]["wandb_extra_log"]
         self.wandb_log_period = self.cfg["env"]["wandb_extra_log_period"]
-
+        self.random_frec = self.cfg["env"]["randomization_freq"]
 
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
@@ -160,6 +160,14 @@ class Go1(VecTask):
         for val in obs_space_dict.values():
             total_obs_dim += val
 
+        self.obs_privilige = self.cfg["env"]["obs_privilege"]
+        if self.obs_privilige:
+            privious_obs_dict = self.cfg["env"]["privilege_obs_num"]
+            privious_obs_dim = 0
+            for val in privious_obs_dict.values():
+                privious_obs_dim += val
+        self.privilige_length = privious_obs_dim
+
         self.obs_history = self.cfg["env"]["obs_history"]
         self.history_length = self.cfg["env"]["history_length"]
         
@@ -170,10 +178,16 @@ class Go1(VecTask):
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
         # rewrite obs space
+        obs_space_dict = {}
+        obs_space_dict["state_obs"] = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+
         if self.obs_history:
-            self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf),
-                                     "state_history":spaces.Box(np.ones(self.num_obs*self.history_length) * -np.Inf, np.ones(self.num_obs*self.history_length) * np.Inf),
-                                    })
+            obs_space_dict["state_history"] = spaces.Box(np.ones(self.num_obs*self.history_length) * -np.Inf, np.ones(self.num_obs*self.history_length) * np.Inf)
+            
+        if self.obs_privilige:
+            obs_space_dict["state_privilige"] = spaces.Box(np.ones(self.privilige_length) * -1., np.ones(self.privilige_length) * 1.)
+        
+        self.obs_space = spaces.Dict(obs_space_dict)
 
         self._prepare_reward_function()
 
@@ -288,8 +302,18 @@ class Go1(VecTask):
         self.rew_pos = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
         self.rew_neg = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
 
-        if self.wandb_extra_log:
-            self.log_step_counter = 0
+
+        self.step_counter = 0
+
+        # randomization params
+        self.dof_stiff_rand_params = torch.zeros(self.num_envs, self.num_dof,device=self.device, dtype=torch.float)
+        self.payload_rand_params = torch.zeros(self.num_envs, 1, device=self.device, dtype=torch.float)
+        self.com_rand_params = torch.zeros(self.num_envs, 3, device=self.device, dtype=torch.float)
+        self.friction_rand_params = torch.zeros(self.num_envs, 4, device=self.device, dtype=torch.float)
+        self.restitution_rand_params = torch.zeros(self.num_envs, 4, device=self.device, dtype=torch.float)
+
+        self.privilige_buffer = torch.zeros(self.num_envs, self.privilige_length, device=self.device, dtype=torch.float)
+
 
     def create_sim(self):
         self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
@@ -349,10 +373,15 @@ class Go1(VecTask):
         self.base_index = 0
 
         dof_props = self.gym.get_asset_dof_properties(a1)
-        for i in range(self.num_dof):
-            dof_props['driveMode'][i] = gymapi.DOF_MODE_POS
-            dof_props['stiffness'][i] = self.cfg["env"]["control"]["stiffness"] #self.Kp
-            dof_props['damping'][i] = self.cfg["env"]["control"]["damping"] #self.Kd
+        # print("=== dof_props: ", dof_props)
+        # print("=== dof_props_type: ", type(dof_props))
+        dof_props['driveMode'][0:self.num_dof] = gymapi.DOF_MODE_POS
+        dof_props['stiffness'][0:self.num_dof] = self.cfg["env"]["control"]["stiffness"] #self.Kp
+        dof_props['damping'][0:self.num_dof] = self.cfg["env"]["control"]["damping"] #self.Kd
+        # print("=== dof_props: ", dof_props)
+
+        self.default_stiffness = self.cfg["env"]["control"]["stiffness"]
+
 
         env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
@@ -367,9 +396,7 @@ class Go1(VecTask):
             env_ptr = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
             a1_handle = self.gym.create_actor(env_ptr, a1, start_pose, "a1", i, 0, 0)
 
-            # if i==0:
-            #     for j in range(len(body_names)):
-            #         print("mass: ", j, body_names[j] , self.gym.get_actor_rigid_body_properties(env_ptr, 0)[j].mass)
+
 
 
             self.gym.set_actor_dof_properties(env_ptr, a1_handle, dof_props)
@@ -391,6 +418,7 @@ class Go1(VecTask):
             self.knee_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.a1_handles[0], knee_names[i])
 
         self.base_index = self.gym.find_actor_rigid_body_handle(self.envs[0], self.a1_handles[0], "base")
+        self.default_mass = self.gym.get_actor_rigid_body_properties(self.envs[0], self.a1_handles[0])[self.base_index].mass
 
     def pre_physics_step(self, actions):
         self.last_last_actions = self.last_actions.clone()
@@ -446,12 +474,14 @@ class Go1(VecTask):
             self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](self.obs_buf)
 
         self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
+        
+        self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)}
 
         if self.obs_history:
-            self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device),
-                                    "state_history":torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)}
-        else:
-            self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+            self.obs_dict["obs"]["state_history"] = torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        if self.obs_privilige:
+            self.obs_dict["obs"]["state_privilige"] = self.privilige_buffer.to(self.rl_device)
 
         # asymmetric actor-critic
         if self.num_states > 0:
@@ -460,7 +490,8 @@ class Go1(VecTask):
         return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
 
     def post_physics_step(self):
-        self.progress_buf += 1
+        self.progress_buf += 1 # this is a tensor for each env
+
 
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1) # env_ides is [id1 id2 ...]
 
@@ -479,7 +510,9 @@ class Go1(VecTask):
         self.compute_reset()
         self.compute_observations()
         self.compute_reward(self.actions)
-        # self.wandb_addtional_log()
+        if self.step_counter % self.random_frec == 0:
+            self.randomize_props()
+        self.step_counter += 1
 
     def compute_reward(self, actions):
         """ Compute rewards
@@ -510,11 +543,9 @@ class Go1(VecTask):
         self.extras.update(extra_info)
 
     def wandb_addtional_log(self):
-        if self.log_step_counter % self.wandb_log_period == 0:
-            self.log_step_counter = 0
+        if self.step_counter % self.wandb_log_period == 0:
             if wandb.run is not None:
                 wandb.log({"curriculum": plt.imshow(torch.sum(self.curriculum.weights_shaped, axis=2).cpu(), cmap='gray').get_figure()})
-        self.log_step_counter += 1
 
 
     def compute_observations(self):
@@ -523,6 +554,13 @@ class Go1(VecTask):
         ang_vel_scale = self.ang_vel_scale
         dof_pos_scale = self.dof_pos_scale
         dof_vel_scale = self.dof_vel_scale
+
+        base_quat = self.root_states[:, 3:7]
+        base_pose = self.root_states[:, 0:3]
+        base_lin_vel = quat_rotate_inverse(base_quat, self.root_states[:, 7:10]) * lin_vel_scale
+        base_ang_vel = quat_rotate_inverse(base_quat, self.root_states[:, 10:13]) * ang_vel_scale
+
+
         self.contact_state = (self.contact_forces[:, self.feet_indices, 2] > 1.).view(self.num_envs,
                 -1) * 1.0
         
@@ -535,8 +573,6 @@ class Go1(VecTask):
 
 
         obs = torch.cat((
-            #base_lin_vel,
-            #base_ang_vel,
             self.projected_gravity,
             commands_scaled,
             dof_pos_scaled,
@@ -545,7 +581,14 @@ class Go1(VecTask):
         ), dim=-1)
 
         self.obs_buf[:] = obs
-        self.history_buffer[:] = torch.cat((obs, self.history_buffer[:, self.num_obs:]), dim=1)
+
+        if self.obs_history:
+            self.history_buffer[:] = torch.cat((obs, self.history_buffer[:, self.num_obs:]), dim=1)
+
+        if self.obs_privilige:
+            self.privilige_buffer = torch.cat([base_lin_vel, base_ang_vel,
+                self.dof_stiff_rand_params, self.payload_rand_params, self.com_rand_params, self.friction_rand_params, self.restitution_rand_params], dim= 1)
+
 
     def refresh_buffers(self):
         self.gym.refresh_dof_state_tensor(self.sim)  # done in step
@@ -571,6 +614,42 @@ class Go1(VecTask):
         
         self.reset_buf[:] = reset
 
+
+    def randomize_props(self):
+        print("randomize properties of the environment")
+        self.dof_stiff_rand_params = torch.rand((self.num_envs, self.num_dof), device=self.device) * 2 - 1 # regularize [-1, 1]
+
+        self.payload_rand_params = torch.rand((self.num_envs, 1), device=self.device) * 2 - 1 # regularize [-1, 1]
+        self.com_rand_params = torch.rand((self.num_envs, 3), device=self.device) * 2 - 1 # regularize [-1, 1]
+
+        self.friction_rand_params = torch.rand((self.num_envs, 4), device=self.device) * 2 - 1 # regularize [-1, 1]
+        self.restitution_rand_params = torch.rand((self.num_envs, 4), device=self.device) * 2 - 1
+        
+        for i in range(self.num_envs):
+            actor_handle = self.a1_handles[i]
+            env_handle = self.envs[i]
+            # get properties from actor
+            # DOF
+            dof_props = self.gym.get_actor_dof_properties(env_handle, actor_handle)
+            # print("==== dof_props:", dof_props)
+            for s in range(self.num_dof):
+                dof_props["stiffness"][s] = self.cfg["env"]["random_params"]["stiffness"]["range_low"] + (self.cfg["env"]["random_params"]["stiffness"]["range_high"] - self.cfg["env"]["random_params"]["stiffness"]["range_low"]) * self.dof_stiff_rand_params[i, s].item()
+            self.gym.set_actor_dof_properties(env_handle,actor_handle, dof_props)
+
+            # Rigid
+            rigid_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
+            rigid_props[0].mass = self.default_mass + self.payload_rand_params[i, 0].item() * (self.cfg["env"]["random_params"]["payload"]["range_high"] - self.cfg["env"]["random_params"]["payload"]["range_low"]) + self.cfg["env"]["random_params"]["payload"]["range_low"]
+            rigid_props[0].com = gymapi.Vec3(
+                self.com_rand_params[i, 0] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"],
+                self.com_rand_params[i, 1] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"],
+                self.com_rand_params[i, 2] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"])
+            self.gym.set_actor_rigid_body_properties(env_handle, actor_handle, rigid_props, recomputeInertia=True)
+
+            # Shape
+            shape_props_list = self.gym.get_actor_rigid_shape_properties(env_handle, actor_handle)
+            for s in range(4): # four legs and feets
+                shape_props_list[s + 1].friction = self.friction_rand_params[i, s].item() * (self.cfg["env"]["random_params"]["friction"]["range_high"] - self.cfg["env"]["random_params"]["friction"]["range_low"]) + self.cfg["env"]["random_params"]["friction"]["range_low"]
+                shape_props_list[s + 1].restitution = self.restitution_rand_params[i, s].item() * (self.cfg["env"]["random_params"]["restitution"]["range_high"] - self.cfg["env"]["random_params"]["restitution"]["range_low"]) + self.cfg["env"]["random_params"]["restitution"]["range_low"]
 
 
     def resample_commands(self, env_ids):
@@ -616,7 +695,8 @@ class Go1(VecTask):
         self.reset_buf[env_ids] = 1
         self.last_actions[env_ids] = 0.
         self.last_last_actions[env_ids] = 0.
-        self.history_buffer[env_ids,:] = torch.tile(self.history_per_begin, (len(env_ids), 1))
+        if self.obs_history:
+            self.history_buffer[env_ids,:] = torch.tile(self.history_per_begin, (len(env_ids), 1))
         
         for i in range(len(self.lag_buffer)):
             self.lag_buffer[i][env_ids, :] = 0
@@ -630,11 +710,13 @@ class Go1(VecTask):
 
         self.obs_buf[:,2] = -1
 
+        self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)}
+
         if self.obs_history:
-            self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device),
-                                    "state_history":torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)}
-        else:
-            self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+            self.obs_dict["obs"]["state_history"] = torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        if self.obs_privilige:
+            self.obs_dict["obs"]["state_privilige"] = self.privilige_buffer.to(self.rl_device)
 
         # asymmetric actor-critic
         if self.num_states > 0:

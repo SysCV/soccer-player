@@ -2,13 +2,13 @@ params:
   seed: ${...seed}
 
   algo:
-    name: a2c_continuous
+    name: sea_ac
 
   model:
-    name: continuous_a2c_logstd
+    name: continuous_sea
 
   network:
-    name: actor_critic_state
+    name: actor_critic_sea
     separate: False
 
     space:
@@ -24,6 +24,16 @@ params:
 
     mlp:
       units: [256, 128, 64]
+      activation: elu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+    history:
+      units: [256, 32]
       activation: elu
       d2rl: False
 
@@ -61,9 +71,11 @@ params:
     minibatch_size: 8192
     mini_epochs: 5
     critic_coef: 2
+
     clip_value: True
     seq_len: 4 # only for rnn
     bounds_loss_coef: 0.001
+    estimate_coef: 1
 
     max_epochs: ${resolve_default:2000,${....max_iterations}}
     save_best_after: 200

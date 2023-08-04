@@ -10,7 +10,7 @@ env:
 
   cameraSensorPlt: false
 
-  state_obs: False
+  state_obs: false
   state_observations:
     # base_lin_vel: 3
     base_ang_vel: 3

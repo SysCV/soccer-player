@@ -4,7 +4,7 @@ from rl_games.algos_torch import torch_ext
 from rl_games.algos_torch import central_value
 from rl_games.common import common_losses
 from rl_games.common import datasets
-from rl_games.common.a2c_common import print_statistics
+from rl_games.common.a2c_common import print_statistics, A2CBase
 
 
 from torch import optim
@@ -24,6 +24,7 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
         a2c_common.ContinuousA2CBase.__init__(self, base_name, params)
 
         # for adaptor learning
+        self.estimate_coef = self.config.get('estimate_coef', None)
 
         obs_shape = self.obs_shape
         build_config = {
@@ -122,7 +123,7 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
             entropy = res_dict['entropy']
             mu = res_dict['mus']
             sigma = res_dict['sigmas']
-            priv_states = obs_batch["obs"]["state_priv"]
+            priv_states = obs_batch["state_privilige"]
             e_state = res_dict["latent"]
 
             e_loss = torch.nn.functional.mse_loss(priv_states,e_state)
@@ -195,7 +196,7 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
         return b_loss
 
     def train_epoch(self):
-        super().train_epoch()
+        super(A2CBase,self).train_epoch()
 
         self.set_eval()
         play_time_start = time.time()

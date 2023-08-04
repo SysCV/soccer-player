@@ -7,7 +7,7 @@ import torch.nn as nn
 import numpy as np
 
 
-class SEAA2CBuilder(network_builder.NetworkBuilder):
+class A2CBuilder(network_builder.NetworkBuilder):
     def __init__(self, **kwargs):
         network_builder.NetworkBuilder.__init__(self)
 
@@ -34,7 +34,7 @@ class SEAA2CBuilder(network_builder.NetworkBuilder):
 
             in_osb_shape = input_shape['state_obs'][0]
             in_history_shape = input_shape['state_history'][0]
-            out_history_shape = input_shape['state_priv'][0]
+            out_history_shape = input_shape['state_privilige'][0]
             self.history_units = self.history_units + [out_history_shape]
 
             history_mlp_args = {
@@ -230,5 +230,5 @@ class SEAA2CBuilder(network_builder.NetworkBuilder):
             return nn.Sequential(*history_layers)(torch.rand(1, *(input_shape))).flatten(1).data.size(1)
 
     def build(self, name, **kwargs):
-        net = HisA2CBuilder.Network(self.params, **kwargs)
+        net = A2CBuilder.Network(self.params, **kwargs)
         return net

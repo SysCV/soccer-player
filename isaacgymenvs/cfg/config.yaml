@@ -51,7 +51,7 @@ wandb_logcode_dir: ''
 
 capture_video: False
 capture_video_freq: 5000
-capture_video_len: 100
+capture_video_len: 200
 force_render: False
 
 # disables rendering

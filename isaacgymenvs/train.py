@@ -102,6 +102,13 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning import handwirte_agent
     from isaacgymenvs.learning import handwrite_player
     from isaacgymenvs.learning.history import history_network_builder
+    from isaacgymenvs.learning.baseline import state_network_builder
+
+    from isaacgymenvs.learning.sea import sea_agent
+    from isaacgymenvs.learning.sea import sea_models
+    from isaacgymenvs.learning.sea import sea_network_builder
+
+
     from isaacgymenvs.learning import common_player,common_agent
     import isaacgymenvs
 
@@ -191,16 +198,28 @@ def launch_rlg_hydra(cfg: DictConfig):
     # register new AMP network builder and agent
     def build_runner(algo_observer):
         runner = Runner(algo_observer)
+
+
         runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : amp_continuous.AMPAgent(**kwargs))
         runner.algo_factory.register_builder('pixel_ac', lambda **kwargs : handwirte_agent.A2CPixelAgent(**kwargs))
         runner.algo_factory.register_builder('common_ac', lambda **kwargs : common_agent.CommonAgent(**kwargs))
+        runner.algo_factory.register_builder('sea_ac', lambda **kwargs : sea_agent.A2CAgent(**kwargs))
+
+
         runner.player_factory.register_builder('amp_continuous', lambda **kwargs : amp_players.AMPPlayerContinuous(**kwargs))
         runner.player_factory.register_builder('pixel_ac', lambda **kwargs : handwrite_player.PpoPixelPlayerContinuous(**kwargs))
         runner.player_factory.register_builder('common_ac', lambda **kwargs : common_player.CommonPlayer(**kwargs))
+
+        
         model_builder.register_model('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))
+        model_builder.register_model('continuous_sea', lambda network, **kwargs : sea_models.ModelSEAContinuous(network))
+
+
         model_builder.register_network('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
         model_builder.register_network('actor_critic_pixel', lambda **kwargs : handwrite_network_builder.PixelA2CBuilder())
         model_builder.register_network('actor_critic_history', lambda **kwargs : history_network_builder.HisA2CBuilder())
+        model_builder.register_network('actor_critic_state', lambda **kwargs : state_network_builder.A2CBuilder())
+        model_builder.register_network('actor_critic_sea', lambda **kwargs : sea_network_builder.A2CBuilder())
 
         return runner
 

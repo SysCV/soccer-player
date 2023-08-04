@@ -9,9 +9,11 @@ env:
 
   wandb_extra_log: True
   wandb_extra_log_period: 1000
+  randomization_freq: 5000
 
   obs_history: true
   history_length: 30
+  obs_privilege: true
 
   action_lag_step: 0
 
@@ -25,6 +27,15 @@ env:
     dof_v: 12
     pre_act: 12
     # contact_state: 4
+
+  privilege_obs_num:
+    base_v: 3
+    base_w: 3
+    dof_stiff: 12
+    payload: 1
+    com: 3
+    friction: 4
+    restitution: 4
 
   act_num: 12
 
@@ -59,6 +70,28 @@ env:
     hipAddtionalScale: 0.5
     controlFrequencyInv: 1 # control step every dt
     # todo: change to a1 param?
+
+  random_params:
+    stiffness:
+      enable: true
+      range_low: 15.
+      range_high: 25.
+    friction:
+      enable: true
+      range_low: 0.2
+      range_high: 1.25
+    restitution:
+      enable: true
+      range_low: 0.0
+      range_high: 0.7
+    payload:
+      enable: true
+      range_low: -1.0
+      range_high: 2.0
+    com:
+      enable: true
+      range_low: -0.05
+      range_high: 0.05
 
   defaultJointAngles:  # = target angles when action = 0.0
     FL_hip_joint: 0.1   # [rad]
@@ -161,7 +194,7 @@ sim:
     contact_collection: 1 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (broken - do not use!)
 
 task:
-  randomize: True
+  randomize: False
   randomization_params:
     frequency: 600   # Define how many environment steps between generating new randomizations
     observations:
