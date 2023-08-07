@@ -8,12 +8,12 @@ env:
   envSpacing: 2.  # [m]
 
   wandb_extra_log: True
-  wandb_extra_log_period: 1000
+  wandb_extra_log_period: 2000
   randomization_freq: 5000
 
   obs_history: true
   history_length: 30
-  obs_privilege: true
+
 
   action_lag_step: 0
 
@@ -26,14 +26,22 @@ env:
     dof_p: 12
     dof_v: 12
     pre_act: 12
+    gait_sin_indict: 4
     # contact_state: 4
 
+  gait_condition:
+    # trotting [0.5,0,0] pacing [0,0,0.5]
+    phases: 0.5
+    offsets: 0.0
+    bounds: 0.0
+    kappa: 0.07
+    
+  obs_privilege: true
   privilege_obs_num:
     base_v: 3
     base_w: 3
     dof_stiff: 12
     payload: 1
-    com: 3
     friction: 4
     restitution: 4
 
@@ -43,23 +51,23 @@ env:
   clipActions: 1.0
 
   plane:
-    staticFriction: 1.0  # [-]
-    dynamicFriction: 1.0  # [-]
+    staticFriction: 0.5  # [-]
+    dynamicFriction: 0.5  # [-]
     restitution: 0.        # [-]
 
   baseInitState:
-    pos: [0.0, 0.0, 0.30] # x,y,z [m]
+    pos: [0.0, 0.0, 0.35] # x,y,z [m]
     rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
     vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
-    linear_x: [-2.0, 2.0] # min max [m/s]
-    num_bins_x: 10 # 20
+    linear_x: [-3.0, 3.0] # min max [m/s]
+    num_bins_x: 11 # 20
     linear_y: [ -0.5, 0.5]   # min max [m/s]
-    num_bins_y: 10 # 20
-    yaw: [ -0.5, 0.5]          # min max [rad/s]
-    num_bins_yaw: 10 # 5
+    num_bins_y: 1 # 20
+    yaw: [ -1.0, 1.0]          # min max [rad/s]
+    num_bins_yaw: 11 # 5
 
   control:
     type: "pose_pd" # pose_pd / actuator_net
@@ -78,20 +86,16 @@ env:
       range_high: 25.
     friction:
       enable: true
-      range_low: 0.2
-      range_high: 1.25
+      range_low: 0.4
+      range_high: 1.2
     restitution:
       enable: true
       range_low: 0.0
-      range_high: 0.7
+      range_high: 0.6
     payload:
       enable: true
       range_low: -1.0
       range_high: 2.0
-    com:
-      enable: true
-      range_low: -0.05
-      range_high: 0.05
 
   defaultJointAngles:  # = target angles when action = 0.0
     FL_hip_joint: 0.1   # [rad]
@@ -138,6 +142,9 @@ env:
 
       base_height: -0.001
 
+      # walk this way
+      tracking_contacts_shaped_force: 4.0
+      tracking_contacts_shaped_vel: 4.0
 
     rewardParams:
       tracking_lin_vel:
@@ -148,6 +155,10 @@ env:
         target: 0.32
       feet_air_time:
         baseline: 0.5
+      tracking_contacts_shaped_force:
+        sigma: 100.
+      tracking_contacts_shaped_vel:
+        sigma: 10.
 
   learn:
     # normalization
@@ -157,10 +168,10 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 10
+    episodeLength_s: 15
     curriculum:
-      resample_s: 3
-      success_threshold: 2.
+      resample_s: 5
+      success_threshold: 3.
       local_range: [0.6,0.3,0.3]
 
   # viewer cam:

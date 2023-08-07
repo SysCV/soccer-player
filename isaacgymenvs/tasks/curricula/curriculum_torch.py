@@ -28,9 +28,8 @@ class TorchCurriculum:
 
         self.weights[inds] = value
 
-    def __init__(self, seed, device, **key_ranges):
+    def __init__(self, device, **key_ranges):
         self.device = device
-        self.rng = torch.random.manual_seed(seed)
 
         self.cfg = cfg = {}
         self.indices = indices = {}
@@ -98,8 +97,8 @@ class TorchCurriculum:
 
 
 class RewardThresholdCurriculum(TorchCurriculum):
-    def __init__(self, seed, device, **kwargs):
-        super().__init__(seed, device, **kwargs)
+    def __init__(self, device, **kwargs):
+        super().__init__(device, **kwargs)
 
     def get_local_bins(self, bin_inds, ranges=0.1):
         if isinstance(ranges, float):
@@ -133,11 +132,11 @@ class RewardThresholdCurriculum(TorchCurriculum):
             self.weights[adjacent_inds] = torch.clamp(self.weights[adjacent_inds] + 0.2, 0, 1)
 
 if __name__ == '__main__':
-    r = RewardThresholdCurriculum(100, device='cuda:0', x=(-1, 1, 5), y=(-1, 1, 6), z=(-1, 1, 11))
+    r = RewardThresholdCurriculum(device='cuda:0', x=(-1, 1, 5), y=(-1, 1, 6), z=(-1, 1, 11))
 
     assert r._raw_grid.shape == (3, 5, 6, 11), "grid shape is wrong: {}".format(r.grid.shape)  # the first dimension is (x, y, z)
 
-    low, high = torch.tensor([-0.2, -0.6, -0.2], device='cuda:0'), torch.tensor([0.2, 0.6, 0.2], device='cuda:0')
+    low, high = torch.tensor([-1, -1, -1], device='cuda:0'), torch.tensor([1, 1, 1], device='cuda:0')
     
     # r.set_to([-0.2, -0.6, -0.2], [0.2, 0.6, 0.2], value=1.0)
     
@@ -148,7 +147,8 @@ if __name__ == '__main__':
     plt.scatter(*samples.T[0:2].cpu())
     plt.show()
 
-    plt.imshow(torch.sum(r.weights_shaped, dim=2).cpu(), cmap='gray')
+    plt.imshow(torch.mean(r.weights_shaped, dim=2).cpu(), cmap='gray',vmin=-1,vmax=1)
+    plt.xticks([0,4],["-2","2"])
     plt.show()
 
     adjacents = r.get_local_bins(torch.tensor([10,]), ranges=0.3)
@@ -166,7 +166,7 @@ if __name__ == '__main__':
     plt.scatter(*samples.T[0:2].cpu())
     plt.show()
 
-    plt.imshow(torch.sum(r.weights_shaped, dim=2).cpu(), cmap='gray')
+    plt.imshow(torch.mean(r.weights_shaped, dim=2).cpu(), cmap='gray')
     plt.show()
 
     adjacents = r.get_local_bins(torch.tensor([10, ]), ranges=0.3)
@@ -184,5 +184,5 @@ if __name__ == '__main__':
     plt.scatter(*samples.T[0:2].cpu())
     plt.show()
 
-    plt.imshow(torch.sum(r.weights_shaped, dim=2).cpu(), cmap='gray')
+    plt.imshow(torch.mean(r.weights_shaped, dim=2).cpu(), cmap='gray')
     plt.show()

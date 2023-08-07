@@ -64,13 +64,32 @@ class RewardTerms:
         # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
         first_contact = (self.env.feet_air_time > 0.) * self.env.contact_state
         rew_airTime = torch.sum((self.env.feet_air_time - self.env.reward_params["feet_air_time"]["baseline"]) * first_contact, dim=1) # reward only on first contact with the ground
-        self.env.feet_air_time *= self.env.contact_state
+        rew_airTime *= torch.norm(self.env.commands[:, :2], dim=1) > 0.1  # no reward for zero command
+        self.env.feet_air_time *= ~ (self.env.contact_state > 0.) # here fix a  bug!!
         return rew_airTime
     
     def _reward_lin_vel_z(self):
         # Reward forward velocity
         return torch.square(self.env.base_lin_vel[:, 2])
     
+    def _reward_tracking_contacts_shaped_force(self):
+        foot_forces = torch.norm(self.env.contact_forces[:, self.env.feet_indices, :], dim=-1)
+        desired_contact = self.env.desired_contact_states
+
+        reward = 0
+        for i in range(4):
+            reward += - (1 - desired_contact[:, i]) * (
+                        1 - torch.exp(-1 * foot_forces[:, i] ** 2 / self.env.reward_params["tracking_contacts_shaped_force"]["sigma"]))
+        return reward / 4
+
+    def _reward_tracking_contacts_shaped_vel(self):
+        foot_velocities = torch.norm(self.env.foot_velocities, dim=2).view(self.env.num_envs, -1)
+        desired_contact = self.env.desired_contact_states
+        reward = 0
+        for i in range(4):
+            reward += - (desired_contact[:, i] * (
+                        1 - torch.exp(-1 * foot_velocities[:, i] ** 2 / self.env.reward_params["tracking_contacts_shaped_vel"]["sigma"])))
+        return reward / 4
 
     
 

@@ -122,6 +122,11 @@ class Go1(VecTask):
         self.action_scale = self.cfg["env"]["control"]["actionScale"]
         self.hip_addtional_scale = self.cfg["env"]["control"]["hipAddtionalScale"]
 
+        self.phases =  self.cfg["env"]["gait_condition"]["phases"]
+        self.offsets =  self.cfg["env"]["gait_condition"]["offsets"]
+        self.bounds =  self.cfg["env"]["gait_condition"]["bounds"]
+        self.kappa = self.cfg["env"]["gait_condition"]["kappa"] # from walk these ways
+
 
         # reward scales
         self.postive_reward_ji22 = self.cfg["env"]["rewards"]["only_positive_rewards_ji22_style"]
@@ -175,6 +180,7 @@ class Go1(VecTask):
     
         self.cfg["env"]["numActions"] = self.cfg["env"]["act_num"] 
 
+
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
         # rewrite obs space
@@ -222,7 +228,7 @@ class Go1(VecTask):
 
     def init_curriculum(self):
         # init curriculum
-        self.curriculum = RewardThresholdCurriculum(seed=42, device=self.device,
+        self.curriculum = RewardThresholdCurriculum(device=self.device,
                 x_vel=(self.cfg["env"]["randomCommandVelocityRanges"]           ["linear_x"][0],
                         self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][1],
                         self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_x"]),
@@ -247,16 +253,23 @@ class Go1(VecTask):
         self.task_rewards_for_curri = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
 
     def get_wrapped_tensor(self):
+        # default gait
+        self.frequencies = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * 2.0
+
+        self.durations = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * 0.5
+
         # get gym state tensors
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
+        rigid_body_state = self.gym.acquire_rigid_body_state_tensor(self.sim)
         torques = self.gym.acquire_dof_force_tensor(self.sim)
 
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_dof_force_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
@@ -266,6 +279,9 @@ class Go1(VecTask):
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3)  # shape: num_envs, num_bodies, xyz axis
         self.torques = gymtorch.wrap_tensor(torques).view(self.num_envs, self.num_dof)
 
+        self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[:self.num_envs * self.num_bodies, :]
+        self.foot_velocities = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:,self.feet_indices,7:10]
+
         self.commands = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
         self.commands_y = self.commands.view(self.num_envs, 3)[..., 1]
         self.commands_x = self.commands.view(self.num_envs, 3)[..., 0]
@@ -273,8 +289,8 @@ class Go1(VecTask):
         self.default_dof_pos = torch.zeros_like(self.dof_pos, dtype=torch.float, device=self.device, requires_grad=False)
 
         if self.obs_history:
-            assert self.num_obs == 42, "total_obs_dim should be 42"
-            zero_obs = torch.zeros(42, dtype=torch.float32, device=self.device)
+            assert self.num_obs == 46, "total_obs_dim should be 43"
+            zero_obs = torch.zeros(self.num_obs, dtype=torch.float32, device=self.device)
             zero_obs[2] = -1 # default gravity
             self.history_per_begin = torch.tile(zero_obs, (self.history_length,))
             self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs,1))
@@ -302,13 +318,26 @@ class Go1(VecTask):
         self.rew_pos = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
         self.rew_neg = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
 
+        self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                                  requires_grad=False, )
+
+        self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+                                        requires_grad=False)
+        self.clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                        requires_grad=False)
+        self.doubletime_clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                                   requires_grad=False)
+        self.halftime_clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                                 requires_grad=False)
+
 
         self.step_counter = 0
 
-        # randomization params
+
+
+    def prepare_rand_params(self):
         self.dof_stiff_rand_params = torch.zeros(self.num_envs, self.num_dof,device=self.device, dtype=torch.float)
         self.payload_rand_params = torch.zeros(self.num_envs, 1, device=self.device, dtype=torch.float)
-        self.com_rand_params = torch.zeros(self.num_envs, 3, device=self.device, dtype=torch.float)
         self.friction_rand_params = torch.zeros(self.num_envs, 4, device=self.device, dtype=torch.float)
         self.restitution_rand_params = torch.zeros(self.num_envs, 4, device=self.device, dtype=torch.float)
 
@@ -337,9 +366,6 @@ class Go1(VecTask):
     def _create_envs(self, num_envs, spacing, num_per_row):
         asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
         asset_file = "urdf/go1/urdf/go1.urdf"
-        #asset_path = os.path.join(asset_root, asset_file)
-        #asset_root = os.path.dirname(asset_path)
-        #asset_file = os.path.basename(asset_path)
 
         asset_options = gymapi.AssetOptions()
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
@@ -390,12 +416,27 @@ class Go1(VecTask):
         self.a1_handles = []
         self.envs = []
 
+        # randomization params, here because some param can only be applied
+        # during set up
+        self.prepare_rand_params()
+
+        self.payload_rand_params = torch.rand((self.num_envs, 1), device=self.device)  
+
 
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
             a1_handle = self.gym.create_actor(env_ptr, a1, start_pose, "a1", i, 0, 0)
-
+            if i == 0:
+                self.default_mass = self.gym.get_actor_rigid_body_properties(env_ptr, a1_handle)[0].mass
+            # Rigid
+            rigid_props = self.gym.get_actor_rigid_body_properties(env_ptr, a1_handle)
+            rigid_props[0].mass = self.default_mass + self.payload_rand_params[i, 0].item() * (self.cfg["env"]["random_params"]["payload"]["range_high"] - self.cfg["env"]["random_params"]["payload"]["range_low"]) + self.cfg["env"]["random_params"]["payload"]["range_low"]
+            # rigid_props[0].com = gymapi.Vec3(
+            #     self.com_rand_params[i, 0] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"],
+            #     self.com_rand_params[i, 1] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"],
+            #     self.com_rand_params[i, 2] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"])
+            self.gym.set_actor_rigid_body_properties(env_ptr, a1_handle, rigid_props, recomputeInertia=True)
 
 
 
@@ -504,6 +545,7 @@ class Go1(VecTask):
             self.reset_idx(env_ids)
 
         self.refresh_buffers()
+        self._step_contact_targets()
 
         if wandb.run is not None and self.wandb_extra_log:
             self.wandb_addtional_log()
@@ -511,7 +553,7 @@ class Go1(VecTask):
         self.compute_observations()
         self.compute_reward(self.actions)
         if self.step_counter % self.random_frec == 0:
-            self.randomize_props()
+           self.randomize_props()
         self.step_counter += 1
 
     def compute_reward(self, actions):
@@ -545,7 +587,15 @@ class Go1(VecTask):
     def wandb_addtional_log(self):
         if self.step_counter % self.wandb_log_period == 0:
             if wandb.run is not None:
-                wandb.log({"curriculum": plt.imshow(torch.sum(self.curriculum.weights_shaped, axis=2).cpu(), cmap='gray').get_figure()})
+
+                plt.ylabel("velocity-command in [{},{}]".format(
+                    self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][0],
+                    self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][1]))
+                plt.xlabel("angular-command in [{},{}]".format(
+                    self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][0],
+                    self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][1]
+                ))
+                wandb.log({"curriculum": plt.imshow(torch.mean(self.curriculum.weights_shaped, axis=1).cpu(), cmap='gray',vmin=0.,vmax=1.).get_figure()})
 
 
     def compute_observations(self):
@@ -578,6 +628,7 @@ class Go1(VecTask):
             dof_pos_scaled,
             self.dof_vel * dof_vel_scale,
             self.actions,
+            self.clock_inputs,
         ), dim=-1)
 
         self.obs_buf[:] = obs
@@ -587,7 +638,7 @@ class Go1(VecTask):
 
         if self.obs_privilige:
             self.privilige_buffer = torch.cat([base_lin_vel, base_ang_vel,
-                self.dof_stiff_rand_params, self.payload_rand_params, self.com_rand_params, self.friction_rand_params, self.restitution_rand_params], dim= 1)
+                self.dof_stiff_rand_params, self.payload_rand_params, self.friction_rand_params, self.restitution_rand_params], dim= 1)
 
 
     def refresh_buffers(self):
@@ -595,6 +646,7 @@ class Go1(VecTask):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_dof_force_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
 
         self.base_pos = self.root_states[:, :3]
@@ -616,19 +668,16 @@ class Go1(VecTask):
 
 
     def randomize_props(self):
-        print("randomize properties of the environment")
-        self.dof_stiff_rand_params = torch.rand((self.num_envs, self.num_dof), device=self.device) * 2 - 1 # regularize [-1, 1]
+        print("=== randomize properties of the environment")
+        self.dof_stiff_rand_params = torch.rand((self.num_envs, self.num_dof), device=self.device)  
 
-        self.payload_rand_params = torch.rand((self.num_envs, 1), device=self.device) * 2 - 1 # regularize [-1, 1]
-        self.com_rand_params = torch.rand((self.num_envs, 3), device=self.device) * 2 - 1 # regularize [-1, 1]
 
-        self.friction_rand_params = torch.rand((self.num_envs, 4), device=self.device) * 2 - 1 # regularize [-1, 1]
-        self.restitution_rand_params = torch.rand((self.num_envs, 4), device=self.device) * 2 - 1
+        self.friction_rand_params = torch.rand((self.num_envs, 4), device=self.device)  
+        self.restitution_rand_params = torch.rand((self.num_envs, 4), device=self.device) 
         
         for i in range(self.num_envs):
             actor_handle = self.a1_handles[i]
             env_handle = self.envs[i]
-            # get properties from actor
             # DOF
             dof_props = self.gym.get_actor_dof_properties(env_handle, actor_handle)
             # print("==== dof_props:", dof_props)
@@ -636,14 +685,8 @@ class Go1(VecTask):
                 dof_props["stiffness"][s] = self.cfg["env"]["random_params"]["stiffness"]["range_low"] + (self.cfg["env"]["random_params"]["stiffness"]["range_high"] - self.cfg["env"]["random_params"]["stiffness"]["range_low"]) * self.dof_stiff_rand_params[i, s].item()
             self.gym.set_actor_dof_properties(env_handle,actor_handle, dof_props)
 
-            # Rigid
-            rigid_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
-            rigid_props[0].mass = self.default_mass + self.payload_rand_params[i, 0].item() * (self.cfg["env"]["random_params"]["payload"]["range_high"] - self.cfg["env"]["random_params"]["payload"]["range_low"]) + self.cfg["env"]["random_params"]["payload"]["range_low"]
-            rigid_props[0].com = gymapi.Vec3(
-                self.com_rand_params[i, 0] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"],
-                self.com_rand_params[i, 1] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"],
-                self.com_rand_params[i, 2] * (self.cfg["env"]["random_params"]["com"]["range_high"]- self.cfg["env"]["random_params"]["com"]["range_low"]) + self.cfg["env"]["random_params"]["com"]["range_low"])
-            self.gym.set_actor_rigid_body_properties(env_handle, actor_handle, rigid_props, recomputeInertia=True)
+
+
 
             # Shape
             shape_props_list = self.gym.get_actor_rigid_shape_properties(env_handle, actor_handle)
@@ -690,11 +733,15 @@ class Go1(VecTask):
                                                gymtorch.unwrap_tensor(self.dof_state),
                                                gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
-
+        self.gait_indices[env_ids] = 0
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         self.last_actions[env_ids] = 0.
         self.last_last_actions[env_ids] = 0.
+
+        self.feet_air_time[env_ids,:] = 0. 
+        self.contact_state[env_ids,:] = 0.
+        
         if self.obs_history:
             self.history_buffer[env_ids,:] = torch.tile(self.history_per_begin, (len(env_ids), 1))
         
@@ -771,6 +818,73 @@ class Go1(VecTask):
         #     list(self.reward_scales.keys()) + ["lin_vel_raw", "ang_vel_raw", "lin_vel_residual", "ang_vel_residual",
         #                                        "ep_timesteps"]}
 
+    def _step_contact_targets(self):
+        self.gait_indices = torch.remainder(self.gait_indices + self.dt * self.frequencies, 1.0)
 
 
+        foot_indices = [self.gait_indices + self.phases + self.offsets + self.bounds,
+                            self.gait_indices + self.offsets,
+                            self.gait_indices + self.bounds,
+                            self.gait_indices + self.phases]
 
+        self.foot_indices = torch.remainder(torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0)
+
+        for idxs in foot_indices:
+            stance_idxs = torch.remainder(idxs, 1) < self.durations
+            swing_idxs = torch.remainder(idxs, 1) > self.durations
+
+
+            # print(stance_idxs)
+            idxs[stance_idxs] = torch.remainder(idxs[stance_idxs], 1) * (0.5 / self.durations[stance_idxs])
+
+
+            idxs[swing_idxs] = 0.5 + (torch.remainder(idxs[swing_idxs], 1) - self.durations[swing_idxs]) * (
+                        0.5 / (1 - self.durations[swing_idxs]))
+
+        # if self.cfg.commands.durations_warp_clock_inputs:
+
+        self.clock_inputs[:, 0] = torch.sin(2 * np.pi * foot_indices[0])
+        self.clock_inputs[:, 1] = torch.sin(2 * np.pi * foot_indices[1])
+        self.clock_inputs[:, 2] = torch.sin(2 * np.pi * foot_indices[2])
+        self.clock_inputs[:, 3] = torch.sin(2 * np.pi * foot_indices[3])
+
+        # self.doubletime_clock_inputs[:, 0] = torch.sin(4 * np.pi * foot_indices[0])
+        # self.doubletime_clock_inputs[:, 1] = torch.sin(4 * np.pi * foot_indices[1])
+        # self.doubletime_clock_inputs[:, 2] = torch.sin(4 * np.pi * foot_indices[2])
+        # self.doubletime_clock_inputs[:, 3] = torch.sin(4 * np.pi * foot_indices[3])
+
+        # self.halftime_clock_inputs[:, 0] = torch.sin(np.pi * foot_indices[0])
+        # self.halftime_clock_inputs[:, 1] = torch.sin(np.pi * foot_indices[1])
+        # self.halftime_clock_inputs[:, 2] = torch.sin(np.pi * foot_indices[2])
+        # self.halftime_clock_inputs[:, 3] = torch.sin(np.pi * foot_indices[3])
+
+        # von mises distribution
+        
+        smoothing_cdf_start = torch.distributions.normal.Normal(0,
+                                                                self.kappa).cdf  # (x) + torch.distributions.normal.Normal(1, kappa).cdf(x)) / 2
+
+        smoothing_multiplier_FL = (smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0)) * (
+                1 - smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 0.5)) +
+                                    smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 1) * (
+                                            1 - smoothing_cdf_start(
+                                        torch.remainder(foot_indices[0], 1.0) - 0.5 - 1)))
+        smoothing_multiplier_FR = (smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0)) * (
+                1 - smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 0.5)) +
+                                    smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 1) * (
+                                            1 - smoothing_cdf_start(
+                                        torch.remainder(foot_indices[1], 1.0) - 0.5 - 1)))
+        smoothing_multiplier_RL = (smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0)) * (
+                1 - smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 0.5)) +
+                                    smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 1) * (
+                                            1 - smoothing_cdf_start(
+                                        torch.remainder(foot_indices[2], 1.0) - 0.5 - 1)))
+        smoothing_multiplier_RR = (smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0)) * (
+                1 - smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 0.5)) +
+                                    smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 1) * (
+                                            1 - smoothing_cdf_start(
+                                        torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)))
+
+        self.desired_contact_states[:, 0] = smoothing_multiplier_FL
+        self.desired_contact_states[:, 1] = smoothing_multiplier_FR
+        self.desired_contact_states[:, 2] = smoothing_multiplier_RL
+        self.desired_contact_states[:, 3] = smoothing_multiplier_RR

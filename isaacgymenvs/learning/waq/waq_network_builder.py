@@ -27,7 +27,7 @@ class A2CBuilder(network_builder.NetworkBuilder):
             self.actor_mlp = nn.Sequential()
             self.critic_mlp = nn.Sequential()
             self.history_encoder = nn.Sequential()
-            self.privilige_encoder = nn.Sequential()
+            self.predict_decoder = nn.Sequential()
 
             assert type(input_shape) == dict
             assert (len(input_shape['state_obs']) == 1, 'only flate state observation is supported')
@@ -35,25 +35,15 @@ class A2CBuilder(network_builder.NetworkBuilder):
 
             in_osb_shape = input_shape['state_obs'][0]
             in_history_shape = input_shape['state_history'][0]
-            in_privilige_shape = input_shape['state_privilige'][0]
-            out_history_shape = self.privilige_units[-1]
-            self.history_units = self.history_units + [out_history_shape]
+            mlp_input_shape = in_osb_shape + self.history_units[-1]
 
-            privilige_mlp_args = {
-                'input_size' : in_privilige_shape, 
-                'units' : self.privilige_units, 
-                'activation' : self.privilige_activation, 
-                'norm_func_name' : self.normalization,
-                'dense_func' : torch.nn.Linear,
-                'd2rl' : self.is_d2rl,
-                'norm_only_first_layer' : self.privilige_norm_only_first
-            }
-
-            self.privilige_encoder = self._build_mlp(**privilige_mlp_args)
+            # we have log var
+            self.history_vae_units = self.history_units[:]
+            self.history_vae_units[-1] = self.history_units[-1] + self.history_units[-1] -3
 
             history_mlp_args = {
                 'input_size' : in_history_shape, 
-                'units' : self.history_units, 
+                'units' : self.history_vae_units, 
                 'activation' : self.history_activation, 
                 'norm_func_name' : self.normalization,
                 'dense_func' : torch.nn.Linear,
@@ -63,9 +53,19 @@ class A2CBuilder(network_builder.NetworkBuilder):
 
             self.history_encoder = self._build_mlp(**history_mlp_args)
 
+            predict_mlp_args ={
+                'input_size' : self.history_units[-1], 
+                'units' : self.predict_units + [in_osb_shape], 
+                'activation' : self.predict_activation, 
+                'norm_func_name' : self.normalization,
+                'dense_func' : torch.nn.Linear,
+                'd2rl' : self.is_d2rl,
+                'norm_only_first_layer' : self.predict_norm_only_first
+            }
 
-            mlp_input_shape = in_osb_shape + out_history_shape
+            self.predict_decoder = self._build_mlp(**predict_mlp_args)
 
+            
             in_mlp_shape = mlp_input_shape
             if len(self.units) == 0:
                 out_size = mlp_input_shape
@@ -122,53 +122,42 @@ class A2CBuilder(network_builder.NetworkBuilder):
                     sigma_init(self.sigma)
                 else:
                     sigma_init(self.sigma.weight)  
+        
+        def get_latent(self, obs_dict):
+            obs = obs_dict['obs']
+            state_history = obs['state_history']
+
+        
+            latent = self.history_encoder(state_history)
+            v_est = latent[:,0:3]
+            latent_mean = latent[:,3:3+16]
+            latent_logSigma = latent[:,3+16:3+16+16]
+
+            latent_dist = torch.distributions.Normal(latent_mean, torch.exp(latent_logSigma))
+            latent_resample = latent_dist.rsample()
+
+            predict = self.predict_decoder(torch.cat([v_est,latent_resample],dim=1))
+
+            return v_est, latent_mean, latent_logSigma, predict
+
+
 
         def forward(self, obs_dict):
             obs = obs_dict['obs']
             state_obs = obs['state_obs']
             state_history = obs['state_history']
-            state_privilige = obs["state_privilige"]
             states = obs_dict.get('rnn_states', None)
-            seq_length = obs_dict.get('seq_length', 1)
-            dones = obs_dict.get('dones', None)
-            bptt_len = obs_dict.get('bptt_len', 0)
-
-        
-            latent = self.privilige_encoder(state_privilige)
-
-            out = self.actor_mlp(torch.cat([state_obs,latent],dim=1))
-            value = self.value_act(self.value(out))
-
-            if self.central_value:
-                return value, states
-
-            if self.is_discrete:
-                logits = self.logits(out)
-                return logits, value, states
-            if self.is_multi_discrete:
-                logits = [logit(out) for logit in self.logits]
-                return logits, value, states
-            if self.is_continuous:
-                mu = self.mu_act(self.mu(out))
-                if self.fixed_sigma:
-                    sigma = self.sigma_act(self.sigma)
-                else:
-                    sigma = self.sigma_act(self.sigma(out))
-                return mu, mu*0 + sigma, value, states, latent
-            
-        def student_forward(self, obs_dict):
-            obs = obs_dict['obs']
-            state_obs = obs['state_obs']
-            state_history = obs['state_history']
-            states = obs_dict.get('rnn_states', None)
-            seq_length = obs_dict.get('seq_length', 1)
-            dones = obs_dict.get('dones', None)
-            bptt_len = obs_dict.get('bptt_len', 0)
 
         
             latent = self.history_encoder(state_history)
+            v_est = latent[:,0:3]
+            latent_mean = latent[:,3:3+16]
+            # latent_logSigma = latent[:,3+16:3+16+16]
 
-            out = self.actor_mlp(torch.cat([state_obs,latent],dim=1))
+            out = self.actor_mlp(torch.cat([state_obs,v_est,latent_mean],dim=1))
+
+            predict = self.predict_decoder(torch.cat([v_est,latent_mean],dim=1))
+
             value = self.value_act(self.value(out))
 
             if self.central_value:
@@ -187,17 +176,6 @@ class A2CBuilder(network_builder.NetworkBuilder):
                 else:
                     sigma = self.sigma_act(self.sigma(out))
                 return mu, mu*0 + sigma, value, states
-            
-        def student_latent(self, obs_dict):
-            obs = obs_dict['obs']
-            # print("=== obs_dict", obs)
-            state_history = obs['state_history']
-
-            latent = self.history_encoder(state_history)
-
-            if self.is_continuous:
-                return latent
-            return 
                     
         def is_separate_critic(self):
             return self.separate
@@ -241,9 +219,10 @@ class A2CBuilder(network_builder.NetworkBuilder):
             self.has_rnn = 'rnn' in params
             self.has_space = 'space' in params
             self.has_history = 'history' in params
-            self.has_privilige = 'privilige' in params
+            self.has_predict = 'predict' in params
             self.central_value = params.get('central_value', False)
             self.joint_obs_actions_config = params.get('joint_obs_actions', None)
+
             if self.has_history:
                 self.history_units = params['history']['units']
                 self.history_activation = params['history']['activation']
@@ -252,14 +231,13 @@ class A2CBuilder(network_builder.NetworkBuilder):
             else:
                 NotImplementedError("this net is only for history case.")
 
-
-            if self.has_privilige:
-                self.privilige_units = params['privilige']['units']
-                self.privilige_activation = params['privilige']['activation']
-                self.privilige_initializer = params['privilige']['initializer']
-                self.privilige_norm_only_first = params['privilige'].get('norm_only_first_layer', False)
+            if self.has_predict:
+                self.predict_units = params['predict']['units']
+                self.predict_activation = params['predict']['activation']
+                self.predict_initializer = params['predict']['initializer']
+                self.predict_norm_only_first = params['predict'].get('norm_only_first_layer', False)
             else:
-                NotImplementedError("this net is only for privilige case.")
+                NotImplementedError("this net is only for waq case.")
 
             if self.has_space:
                 self.is_multi_discrete = 'multi_discrete'in params['space']

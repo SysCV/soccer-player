@@ -4,8 +4,9 @@ from rl_games.algos_torch import torch_ext
 from rl_games.algos_torch import central_value
 from rl_games.common import common_losses
 from rl_games.common import datasets
-from rl_games.common.a2c_common import print_statistics, A2CBase
+from rl_games.common.a2c_common import print_statistics, A2CBase, swap_and_flatten01
 
+from isaacgymenvs.learning.waq.waq_experience_buffer import FuExperienceBuffer
 
 from torch import optim
 import torch.distributed as dist
@@ -24,8 +25,10 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
         a2c_common.ContinuousA2CBase.__init__(self, base_name, params)
 
         # for adaptor learning
+        self.is_first_step = True
         self.estimate_coef = self.config.get('estimate_coef', None)
-        self.estimate_ratio = self.config.get('estimate_ratio', None)
+        self.predict_coef = self.config.get('predict_coef', None)
+        self.vae_coef = self.config.get('vae_coef', None)
 
         obs_shape = self.obs_shape
         build_config = {
@@ -98,6 +101,8 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
         actions_batch = input_dict['actions']
         obs_batch = input_dict['obs']
         obs_batch = self._preproc_obs(obs_batch)
+        obses_fu_batch = input_dict['obses_fu']
+        obses_fu_batch = self._preproc_obs(obses_fu_batch)
 
         lr_mul = 1.0
         curr_e_clip = self.e_clip
@@ -124,13 +129,15 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
             entropy = res_dict['entropy']
             mu = res_dict['mus']
             sigma = res_dict['sigmas']
-            # priv_encode = self.model.get_rma_latent(batch_dict)
-            priv_encode = res_dict["rma_latent"]
-            e_state = res_dict["latent"]
+            priv_states = obs_batch["state_privilige"]
+            future_states = obses_fu_batch["state_obs"]
 
-            e_loss_privilige = torch.nn.functional.mse_loss(priv_encode,e_state.detach())
-            e_loss_history = torch.nn.functional.mse_loss(priv_encode.detach(),e_state)
 
+
+            # vae loss
+
+            
+            
             a_loss = self.actor_loss_func(old_action_log_probs_batch, action_log_probs, advantage, self.ppo, curr_e_clip)
 
             if self.has_value_loss:
@@ -147,7 +154,7 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
 
             a_loss, c_loss, entropy, b_loss = losses[0], losses[1], losses[2], losses[3]
 
-            loss = a_loss + 0.5 * c_loss * self.critic_coef - entropy * self.entropy_coef + b_loss * self.bounds_loss_coef + self.estimate_coef * (self.estimate_ratio * e_loss_history + (1 - self.estimate_ratio)* e_loss_privilige)
+            loss_rl = a_loss + 0.5 * c_loss * self.critic_coef - entropy * self.entropy_coef + b_loss * self.bounds_loss_coef 
             
             if self.multi_gpu:
                 self.optimizer.zero_grad()
@@ -155,9 +162,40 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
                 for param in self.model.parameters():
                     param.grad = None
 
-        self.scaler.scale(loss).backward()
+        self.scaler.scale(loss_rl).backward()
         #TODO: Refactor this ugliest code of they year
         self.trancate_gradients_and_step()
+
+
+        # for latent train
+        latent_batch_dict = {
+            'is_latent': True,
+            'prev_actions': actions_batch, 
+            'obs' : obs_batch,
+        }
+        res_dict = self.model(latent_batch_dict)
+        v_est = res_dict["v_est"]
+        latent_mu = res_dict["latent_mu"] 
+        latent_logsigma = res_dict["latent_sigma"]
+        predict = res_dict["predict"]
+
+        e_loss = torch.nn.functional.mse_loss(priv_states[:,0:3],v_est)
+
+        predict_loss = torch.nn.functional.mse_loss(predict, future_states)
+
+        vae_loss = -0.5 * torch.sum(1 + 2 * latent_logsigma - latent_mu.pow(2) - (latent_logsigma * 2.).exp(), dim = 1)
+
+        latent_loss = self.estimate_coef * e_loss + self.predict_coef * predict_loss + self.vae_coef * vae_loss
+
+        if self.multi_gpu:
+            self.optimizer.zero_grad()
+        else:
+            for param in self.model.parameters():
+                param.grad = None
+
+        self.scaler.scale(latent_loss).backward()
+        self.trancate_gradients_and_step()
+
 
         with torch.no_grad():
             reduce_kl = rnn_masks is None
@@ -176,7 +214,7 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
 
         self.train_result = (a_loss, c_loss, entropy, \
             kl_dist, self.last_lr, lr_mul, \
-            mu.detach(), sigma.detach(), b_loss, e_loss_privilige.detach())
+            mu.detach(), sigma.detach(), b_loss, e_loss, predict_loss, vae_loss)
 
     def train_actor_critic(self, input_dict):
         self.calc_gradients(input_dict)
@@ -206,6 +244,7 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
         play_time_start = time.time()
         with torch.no_grad():
             if self.is_rnn:
+                NotImplementedError 
                 batch_dict = self.play_steps_rnn()
             else:
                 batch_dict = self.play_steps()
@@ -225,16 +264,20 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
         c_losses = []
         b_losses = []
         e_losses = []
+        p_losses = []
+        v_losses = []
         entropies = []
         kls = []
 
         for mini_ep in range(0, self.mini_epochs_num):
             ep_kls = []
             for i in range(len(self.dataset)):
-                a_loss, c_loss, entropy, kl, last_lr, lr_mul, cmu, csigma, b_loss, e_loss = self.train_actor_critic(self.dataset[i])
+                a_loss, c_loss, entropy, kl, last_lr, lr_mul, cmu, csigma, b_loss, e_loss, predic_loss, vae_loss = self.train_actor_critic(self.dataset[i])
                 a_losses.append(a_loss)
                 c_losses.append(c_loss)
                 e_losses.append(e_loss)
+                p_losses.append(predic_loss)
+                v_losses.append(vae_loss)
                 ep_kls.append(kl)
                 entropies.append(entropy)
                 if self.bounds_loss_coef is not None:
@@ -269,9 +312,11 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
 
         log_dict={}
         log_dict["losses/system_identification_loss"] = torch_ext.mean_list(e_losses).item()
+        log_dict["losses/prediction_loss"] = torch_ext.mean_list(p_losses).item()
+        log_dict["losses/vae_mean_sigma_loss"] = torch_ext.mean_list(v_losses).item()
 
         return batch_dict['step_time'], play_time, update_time, total_time, a_losses, c_losses, b_losses, entropies, kls, last_lr, lr_mul, log_dict
-
+    
     def train(self):
         self.init_tensors()
         self.last_mean_rewards = -100500
@@ -385,3 +430,156 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
 
             if should_exit:
                 return self.last_mean_rewards, epoch_num
+
+    def play_steps(self):
+        update_list = self.update_list
+
+        step_time = 0.0
+
+        for n in range(self.horizon_length):
+            if self.use_action_masks:
+                masks = self.vec_env.get_action_masks()
+                res_dict = self.get_masked_action_values(self.obs, masks)
+            else:
+                res_dict = self.get_action_values(self.obs)
+            self.experience_buffer.update_data('obses', n, self.obs['obs'])
+            self.experience_buffer.update_data('dones', n, self.dones)
+
+            for k in update_list:
+                self.experience_buffer.update_data(k, n, res_dict[k]) 
+            if self.has_central_value:
+                self.experience_buffer.update_data('states', n, self.obs['states'])
+
+            step_time_start = time.time()
+            self.obs, rewards, self.dones, infos = self.env_step(res_dict['actions'])
+            step_time_end = time.time()
+
+            step_time += (step_time_end - step_time_start)
+
+            shaped_rewards = self.rewards_shaper(rewards)
+            if self.value_bootstrap and 'time_outs' in infos:
+                shaped_rewards += self.gamma * res_dict['values'] * self.cast_obs(infos['time_outs']).unsqueeze(1).float()
+
+            self.experience_buffer.update_data('rewards', n, shaped_rewards)
+            # for future prediction
+            self.experience_buffer.update_data('obses_fu', n, self.obs['obs'])
+
+            self.current_rewards += rewards
+            self.current_lengths += 1
+            all_done_indices = self.dones.nonzero(as_tuple=False)
+            env_done_indices = all_done_indices[::self.num_agents]
+     
+            self.game_rewards.update(self.current_rewards[env_done_indices])
+            self.game_lengths.update(self.current_lengths[env_done_indices])
+            self.algo_observer.process_infos(infos, env_done_indices)
+
+            not_dones = 1.0 - self.dones.float()
+
+            self.current_rewards = self.current_rewards * not_dones.unsqueeze(1)
+            self.current_lengths = self.current_lengths * not_dones
+
+        last_values = self.get_values(self.obs)
+
+        fdones = self.dones.float()
+        mb_fdones = self.experience_buffer.tensor_dict['dones'].float()
+        mb_values = self.experience_buffer.tensor_dict['values']
+        mb_rewards = self.experience_buffer.tensor_dict['rewards']
+        mb_advs = self.discount_values(fdones, last_values, mb_fdones, mb_values, mb_rewards)
+        mb_returns = mb_advs + mb_values
+
+        batch_dict = self.experience_buffer.get_transformed_list(swap_and_flatten01, self.tensor_list)
+        batch_dict['returns'] = swap_and_flatten01(mb_returns)
+        batch_dict['played_frames'] = self.batch_size
+        batch_dict['step_time'] = step_time
+
+        return batch_dict
+    
+    def init_tensors(self):
+        batch_size = self.num_agents * self.num_actors
+        algo_info = {
+            'num_actors' : self.num_actors,
+            'horizon_length' : self.horizon_length,
+            'has_central_value' : self.has_central_value,
+            'use_action_masks' : self.use_action_masks
+        }
+        self.experience_buffer = FuExperienceBuffer(self.env_info, algo_info, self.ppo_device)
+
+        val_shape = (self.horizon_length, batch_size, self.value_size)
+        current_rewards_shape = (batch_size, self.value_size)
+        self.current_rewards = torch.zeros(current_rewards_shape, dtype=torch.float32, device=self.ppo_device)
+        self.current_lengths = torch.zeros(batch_size, dtype=torch.float32, device=self.ppo_device)
+        self.dones = torch.ones((batch_size,), dtype=torch.uint8, device=self.ppo_device)
+
+        if self.is_rnn:
+            self.rnn_states = self.model.get_default_rnn_state()
+            self.rnn_states = [s.to(self.ppo_device) for s in self.rnn_states]
+
+            total_agents = self.num_agents * self.num_actors
+            num_seqs = self.horizon_length // self.seq_len
+            assert((self.horizon_length * total_agents // self.num_minibatches) % self.seq_len == 0)
+            self.mb_rnn_states = [torch.zeros((num_seqs, s.size()[0], total_agents, s.size()[2]), dtype = torch.float32, device=self.ppo_device) for s in self.rnn_states]
+        
+        self.update_list = ['actions', 'neglogpacs', 'values', 'mus', 'sigmas']
+        self.tensor_list = self.update_list + ['obses', 'states', 'dones', 'obses_fu']
+
+    def prepare_dataset(self, batch_dict):
+        obses = batch_dict['obses']
+        obses_fu = batch_dict['obses_fu']
+        returns = batch_dict['returns']
+        dones = batch_dict['dones']
+        values = batch_dict['values']
+        actions = batch_dict['actions']
+        neglogpacs = batch_dict['neglogpacs']
+        mus = batch_dict['mus']
+        sigmas = batch_dict['sigmas']
+        rnn_states = batch_dict.get('rnn_states', None)
+        rnn_masks = batch_dict.get('rnn_masks', None)
+
+        advantages = returns - values
+
+        if self.normalize_value:
+            self.value_mean_std.train()
+            values = self.value_mean_std(values)
+            returns = self.value_mean_std(returns)
+            self.value_mean_std.eval()
+
+        advantages = torch.sum(advantages, axis=1)
+
+        if self.normalize_advantage:
+            if self.is_rnn:
+                if self.normalize_rms_advantage:
+                    advantages = self.advantage_mean_std(advantages, mask=rnn_masks)
+                else:
+                    advantages = torch_ext.normalization_with_masks(advantages, rnn_masks)
+            else:
+                if self.normalize_rms_advantage:
+                    advantages = self.advantage_mean_std(advantages)
+                else:
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        dataset_dict = {}
+        dataset_dict['old_values'] = values
+        dataset_dict['old_logp_actions'] = neglogpacs
+        dataset_dict['advantages'] = advantages
+        dataset_dict['returns'] = returns
+        dataset_dict['actions'] = actions
+        dataset_dict['obs'] = obses
+        dataset_dict['dones'] = dones
+        dataset_dict['rnn_states'] = rnn_states
+        dataset_dict['rnn_masks'] = rnn_masks
+        dataset_dict['mu'] = mus
+        dataset_dict['sigma'] = sigmas
+        dataset_dict['obses_fu'] = obses_fu
+
+        self.dataset.update_values_dict(dataset_dict)
+
+        if self.has_central_value:
+            dataset_dict = {}
+            dataset_dict['old_values'] = values
+            dataset_dict['advantages'] = advantages
+            dataset_dict['returns'] = returns
+            dataset_dict['actions'] = actions
+            dataset_dict['obs'] = batch_dict['states']
+            dataset_dict['dones'] = dones
+            dataset_dict['rnn_masks'] = rnn_masks
+            self.central_value_net.update_dataset(dataset_dict)
