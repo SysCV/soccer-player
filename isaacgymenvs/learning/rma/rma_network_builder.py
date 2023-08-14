@@ -50,6 +50,8 @@ class A2CBuilder(network_builder.NetworkBuilder):
             }
 
             self.privilige_encoder = self._build_mlp(**privilige_mlp_args)
+            if self.privilige_layer_norm:
+                self.privilige_normer = torch.nn.LayerNorm(out_history_shape)
 
             history_mlp_args = {
                 'input_size' : in_history_shape, 
@@ -135,6 +137,8 @@ class A2CBuilder(network_builder.NetworkBuilder):
 
         
             latent = self.privilige_encoder(state_privilige)
+            if self.privilige_layer_norm:
+                latent = self.privilige_normer(latent)
 
             out = self.actor_mlp(torch.cat([state_obs,latent],dim=1))
             value = self.value_act(self.value(out))
@@ -258,6 +262,7 @@ class A2CBuilder(network_builder.NetworkBuilder):
                 self.privilige_activation = params['privilige']['activation']
                 self.privilige_initializer = params['privilige']['initializer']
                 self.privilige_norm_only_first = params['privilige'].get('norm_only_first_layer', False)
+                self.privilige_layer_norm = params['privilige'].get('layer_norm', False)
             else:
                 NotImplementedError("this net is only for privilige case.")
 

@@ -183,7 +183,7 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
 
         predict_loss = torch.nn.functional.mse_loss(predict, future_states)
 
-        vae_loss = -0.5 * torch.sum(1 + 2 * latent_logsigma - latent_mu.pow(2) - (latent_logsigma * 2.).exp(), dim = 1)
+        vae_loss = torch.mean(-0.5 * torch.sum(1 + 2 * latent_logsigma - latent_mu.pow(2) - (latent_logsigma * 2.).exp(), dim = 1), dim=0)
 
         latent_loss = self.estimate_coef * e_loss + self.predict_coef * predict_loss + self.vae_coef * vae_loss
 

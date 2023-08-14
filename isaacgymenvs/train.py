@@ -103,6 +103,7 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning import handwrite_player
     from isaacgymenvs.learning.history import history_network_builder
     from isaacgymenvs.learning.baseline import state_network_builder
+    from isaacgymenvs.learning.baseline import player
 
     from isaacgymenvs.learning.sea import sea_agent
     from isaacgymenvs.learning.sea import sea_models
@@ -219,6 +220,8 @@ def launch_rlg_hydra(cfg: DictConfig):
         runner.player_factory.register_builder('amp_continuous', lambda **kwargs : amp_players.AMPPlayerContinuous(**kwargs))
         runner.player_factory.register_builder('pixel_ac', lambda **kwargs : handwrite_player.PpoPixelPlayerContinuous(**kwargs))
         runner.player_factory.register_builder('common_ac', lambda **kwargs : common_player.CommonPlayer(**kwargs))
+
+        runner.player_factory.register_builder('real_ac', lambda **kwargs : player.RealPlayer(**kwargs))
 
         
         model_builder.register_model('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))

@@ -257,9 +257,10 @@ class Go1WallKicker(VecTask):
     def create_self_buffers(self):
         # initialize some data used later on
         # the differce with monitor is that these are not wrapped gym-state tensors
-        self.extras = {}
 
         self.commands = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
+
+        self.is_first_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
 
         self.commands_x = self.commands.view(self.num_envs, 3)[..., 0]
         self.commands_y = self.commands.view(self.num_envs, 3)[..., 1] 
@@ -553,6 +554,7 @@ class Go1WallKicker(VecTask):
             self.obs_buf = self.dr_randomizations['observations']['noise_lambda'](self.obs_buf)
 
         self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
+        self.extras["is_firsts"] = self.is_first_buf.to(self.rl_device)
 
         if self.pixel_obs:
             self.obs_dict["obs"] = {
@@ -594,9 +596,11 @@ class Go1WallKicker(VecTask):
         if len(goal_env_ids) > 0:
             self.reset_only_target(goal_env_ids)
 
+        self.is_first_buf[:] = False
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1) # env_ides is [id1 id2 ...]
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
+            self.is_first_buf[env_ids] = True
 
         self.set_actor_root_state_tensor_indexed()
 

@@ -104,51 +104,28 @@ import pickle as pkl
 import lcm
 import sys
 
-from go1_gym_deploy.utils.deployment_runner import DeploymentRunner
-from go1_gym_deploy.envs.lcm_agent import LCMAgent
-from go1_gym_deploy.utils.cheetah_state_estimator import StateEstimator
-from go1_gym_deploy.utils.command_profile import *
+from isaacgymenvs.go1_deploy.lcm_agent import LCMAgent
+from isaacgymenvs.go1_deploy.utils.cheetah_state_estimator import StateEstimator
+from isaacgymenvs.go1_deploy.utils.command_profile import *
 
 import pathlib
 
 lc = lcm.LCM("udpm://239.255.76.67:7667?ttl=255")
 
 class Go1Real(VecTask):
-    def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
-
-        # ==================== for real robot =====================
-        print("Initializing the real robot .....................")
-        self.timestep = 0
-        self.se = StateEstimator(lc)
-
-        max_vel=1.0
-        max_yaw_vel=1.0
-        control_dt = 0.02
-        self.dt = control_dt
-
-        command_profile = RCControllerProfile(dt=control_dt, state_estimator=self.se, x_scale=max_vel, y_scale=0.6, yaw_scale=max_yaw_vel)
-        self.command_profile = command_profile
-        hardware_agent = LCMAgent(cfg, self.se, command_profile, device = rl_device)
-        self.agents = {}
-        self.control_agent_name = "hardware_closed_loop"
-        self.agents["hardware_closed_loop"] = hardware_agent
-        self.se.spin()
-        self.button_states = np.zeros(4)
-
-        for agent_name in self.agents.keys():
-            obs = self.agents[agent_name].reset()
-            control_obs = obs
-
-        control_obs = self.calibrate(wait=True)
-
-
-        # ============================
-
+    def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):\
+    
+        self.time = time.time()
         self.cfg = cfg
-        # cam pic
-        self.save_cam = self.cfg["task"]["save_cam_pic"]
-        self.add_fake_ball = self.cfg["task"]["fake_ball"]
-        self.real = self.cfg["env"]["real_robot"]
+        # command ranges
+        self.command_x_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"]
+        self.command_y_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"]
+        self.command_yaw_range = self.cfg["env"]["randomCommandVelocityRanges"]["yaw"]
+        self.dt = control_dt = self.cfg["sim"]["dt"]
+
+        self.phases =  self.cfg["env"]["gait_condition"]["phases"]
+        self.offsets =  self.cfg["env"]["gait_condition"]["offsets"]
+        self.bounds =  self.cfg["env"]["gait_condition"]["bounds"]
 
 
         
@@ -160,34 +137,7 @@ class Go1Real(VecTask):
         self.action_scale = self.cfg["env"]["control"]["actionScale"]
         self.hip_addtional_scale = self.cfg["env"]["control"]["hipAddtionalScale"]
 
-        # reward scales
-        self.rew_scales = {}
-        self.rew_scales["lin_vel_xy"] = self.cfg["env"]["learn"]["linearVelocityXYRewardScale"]
-        self.rew_scales["ang_vel_z"] = self.cfg["env"]["learn"]["angularVelocityZRewardScale"]
-        self.rew_scales["torque"] = self.cfg["env"]["learn"]["torqueRewardScale"]
 
-        # randomization
-        self.randomization_params = self.cfg["task"]["randomization_params"]
-        self.randomize = self.cfg["task"]["randomize"]
-
-        # command ranges
-        self.command_x_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"]
-        self.command_y_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"]
-        self.command_yaw_range = self.cfg["env"]["randomCommandVelocityRanges"]["yaw"]
-
-        # plane params
-        self.plane_static_friction = self.cfg["env"]["plane"]["staticFriction"]
-        self.plane_dynamic_friction = self.cfg["env"]["plane"]["dynamicFriction"]
-        self.plane_restitution = self.cfg["env"]["plane"]["restitution"]
-
-        # base init state
-        pos = self.cfg["env"]["baseInitState"]["pos"]
-        rot = self.cfg["env"]["baseInitState"]["rot"]
-        v_lin = self.cfg["env"]["baseInitState"]["vLinear"]
-        v_ang = self.cfg["env"]["baseInitState"]["vAngular"]
-        state = pos + rot + v_lin + v_ang
-
-        self.base_init_state = state
 
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
@@ -198,7 +148,10 @@ class Go1Real(VecTask):
             total_obs_dim += val
         self.cfg["env"]["numObservations"] = total_obs_dim 
     
-        self.cfg["env"]["numActions"] = self.cfg["env"]["act_num"] 
+        self.cfg["env"]["numActions"] = self.cfg["env"]["act_num"]
+
+        self.obs_history = self.cfg["env"]["obs_history"]
+        self.history_length = self.cfg["env"]["history_length"]
 
         # don't need to create sim here
         split_device = sim_device.split(":")
@@ -216,22 +169,21 @@ class Go1Real(VecTask):
 
         self.rl_device = rl_device
 
-        # Rendering
-        # if training in a headless mode
-        self.headless = headless
-
-        enable_camera_sensors = config.get("enableCameraSensors", False)
-        self.graphics_device_id = graphics_device_id
-        if enable_camera_sensors == False and self.headless == True:
-            self.graphics_device_id = -1
-
         self.num_environments = config["env"]["numEnvs"]
         self.num_agents = config["env"].get("numAgents", 1)  # used for multi-agent environments
 
         self.num_observations = config["env"].get("numObservations", 0)
         self.num_states = config["env"].get("numStates", 0)
 
-        self.obs_space = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+        # rewrite obs space
+        obs_space_dict = {}
+        obs_space_dict["state_obs"] = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+
+        if self.obs_history:
+            obs_space_dict["state_history"] = spaces.Box(np.ones(self.num_obs*self.history_length) * -np.Inf, np.ones(self.num_obs*self.history_length) * np.Inf)
+        
+        self.obs_space = spaces.Dict(obs_space_dict)
+
         self.state_space = spaces.Box(np.ones(self.num_states) * -np.Inf, np.ones(self.num_states) * np.Inf)
 
         self.num_actions = config["env"]["numActions"]
@@ -242,11 +194,6 @@ class Go1Real(VecTask):
         self.clip_obs = config["env"].get("clipObservations", np.Inf)
         self.clip_actions = config["env"].get("clipActions", np.Inf)
 
-        # Total number of training frames since the beginning of the experiment.
-        # We get this information from the learning algorithm rather than tracking ourselves.
-        # The learning algorithm tracks the total number of frames since the beginning of training and accounts for
-        # experiments restart/resumes. This means this number can be > 0 right after initialization if we resume the
-        # experiment.
         self.total_train_env_frames: int = 0
 
         # number of control steps
@@ -272,16 +219,52 @@ class Go1Real(VecTask):
             self.num_envs, device=self.device, dtype=torch.long)
         self.randomize_buf = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long)
+        
+        self.gait_indices = torch.zeros(self.num_envs, device=self.device,dtype=torch.float)
+        self.clock_inputs = torch.zeros((self.num_envs, 4), device=self.device,dtype=torch.float)
+        
+        if self.obs_history:
+            assert self.num_obs == 46, "total_obs_dim should be 43"
+            zero_obs = torch.zeros(self.num_obs, dtype=torch.float32, device=self.device)
+            zero_obs[2] = -1 # default gravity
+            self.history_per_begin = torch.tile(zero_obs, (self.history_length,))
+            self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs,1))
+
         self.extras = {}
 
-        self.obs_buf = control_obs
+        # ==================== for real robot =====================
+        print("Initializing the real robot .....................")
+        self.timestep = 0
+        self.se = StateEstimator(lc)
+
+        max_x_vel = self.command_x_range[1]
+        max_y_vel = self.command_y_range[1]
+        max_yaw_vel = self.command_yaw_range[1]
+
+        command_profile = RCControllerProfile(dt=control_dt, state_estimator=self.se, x_scale=max_x_vel, y_scale=max_y_vel, yaw_scale=max_yaw_vel)
+        self.command_profile = command_profile
+        hardware_agent = LCMAgent(cfg, self.se, command_profile, device = rl_device)
+        self.agents = {}
+        self.control_agent_name = "hardware_closed_loop"
+        self.agents["hardware_closed_loop"] = hardware_agent
+        self.se.spin()
+        self.button_states = np.zeros(4)
+
+        for agent_name in self.agents.keys():
+            obs = self.agents[agent_name].reset()
+
+
+        # ============================
+
+
+        self.calibrate()
 
     def create_sim(self):
         pass
 
     def calibrate(self, wait=True, low=False):
         # first, if the robot is not in nominal pose, move slowly to the nominal pose
-        print("Calibrating the robot !!!!")
+        print("Calibrating the robot to stand pose!!!!")
         if hasattr(self.agents["hardware_closed_loop"], "get_obs"):
             agent = self.agents["hardware_closed_loop"]
             agent.get_obs()
@@ -295,7 +278,7 @@ class Go1Real(VecTask):
                 final_goal = np.zeros(12)
             nominal_joint_pos = agent.default_dof_pos
 
-            print(f"About to calibrate; the robot will stand [Press R2 to calibrate]")
+            print(f"About to reset; the robot will stand [Press R2 to calibrate]")
             while wait:
                 self.button_states = self.command_profile.get_buttons()
                 if self.command_profile.state_estimator.right_lower_right_switch_pressed:
@@ -317,96 +300,19 @@ class Go1Real(VecTask):
                 next_target[[0, 3, 6, 9]] /= hip_reduction
                 next_target = next_target / action_scale
                 cal_action[:, 0:12] = next_target
-                agent.step(torch.from_numpy(cal_action))
+                agent.step_once(torch.from_numpy(cal_action))
                 agent.get_obs()
                 time.sleep(0.05)
 
             print("Starting pose calibrated [Press R2 to start controller]")
+            self.reset_gait_indices()
             while True:
                 self.button_states = self.command_profile.get_buttons()
                 if self.command_profile.state_estimator.right_lower_right_switch_pressed:
                     self.command_profile.state_estimator.right_lower_right_switch_pressed = False
                     break
 
-            for agent_name in self.agents.keys():
-                obs = self.agents[agent_name].reset()
-                if agent_name == "hardware_closed_loop":
-                    control_obs = obs
-
-        return control_obs
-    
-
-    def pre_physics_step(self, actions):
-        self.time = time.time()
-        self.actions = actions.clone().to(self.device)
-        # self.actions[:,0:3] = 0.
-
-        # actions_scaled = self.actions[:, :12] * self.action_scale
-        # actions_scaled[:, [0, 3, 6, 9]] *= self.hip_addtional_scale
-        # targets = actions_scaled
-        self.agents["hardware_closed_loop"].publish_action(self.actions, hard_reset=False) # default pos will be added inside the agent
-
-        time.sleep(max(self.dt - (time.time() - self.time), 0))
-        if self.control_steps % 100 == 0: 
-            print(f'frq: {1 / (time.time() - self.time)} Hz', end=' ')
-            print(f'control_steps: {self.control_steps}')
-        self.time = time.time()
-
-    def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        """Step the physics of the environment.
-
-        Args:
-            actions: actions to apply
-        Returns:
-            Observations, rewards, resets, info
-            Observations are dict of observations (currently only one member called 'obs')
-        """
-
-        action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
-        # apply actions
-        self.pre_physics_step(action_tensor)
-
-
-        # compute observations, rewards, resets, ...
-        self.post_physics_step()
-
-        self.control_steps += 1
-
-
-        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
-
-
-        return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
-
-    def post_physics_step(self):
-
-        self.compute_observations()
-        self.compute_reward(self.actions)
-
-        rpy = self.agents[self.control_agent_name].se.get_rpy()
-        if abs(rpy[0]) > 1.6 or abs(rpy[1]) > 1.6:
-            self.calibrate(wait=False, low=True)
-
-
-        if self.command_profile.state_estimator.right_lower_right_switch_pressed:
-            control_obs = self.calibrate(wait=False)
-            time.sleep(1)
-            self.command_profile.state_estimator.right_lower_right_switch_pressed = False
-            # self.button_states = self.command_profile.get_buttons()
-            while not self.command_profile.state_estimator.right_lower_right_switch_pressed:
-                time.sleep(0.01)
-                # self.button_states = self.command_profile.get_buttons()
-            self.command_profile.state_estimator.right_lower_right_switch_pressed = False
-
-
-    def compute_reward(self, actions):
-        self.rew_buf[0] = 0
-
-    def compute_observations(self):
         obs = self.agents["hardware_closed_loop"].get_obs()
-
-
-
 
         gravity_vec = obs[:,0:3]
         commands = obs[:,3:6]
@@ -439,13 +345,174 @@ class Go1Real(VecTask):
             dof_pos_scaled,
             dof_vel_scaled,
             actions,
+            self.clock_inputs
             # self.actions,
-            contact_states
+            # contact_states
         ), dim=-1)
 
         self.obs_buf[:] = obs
+
+        if self.obs_history:
+            self.history_buffer[:] = torch.cat((obs, self.history_buffer[:, self.num_obs:]), dim=1)
+    
+
+    def pre_physics_step(self, actions):
+        self.actions = actions.clone().to(self.device)
+        self.agents["hardware_closed_loop"].publish_action(self.actions, hard_reset=False) # default pos will be added inside the agent
+
+        time.sleep(max(self.dt - (time.time() - self.time), 0))
+        if self.control_steps % 100 == 0: 
+            print(f'frq: {1 / (time.time() - self.time)} Hz', end=' ')
+            print(f'control_steps: {self.control_steps}')
+        self.time = time.time()
+
+    def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
+        """Step the physics of the environment.
+
+        Args:
+            actions: actions to apply
+        Returns:
+            Observations, rewards, resets, info
+            Observations are dict of observations (currently only one member called 'obs')
+        """
+
+        action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
+        # apply actions
+        self.pre_physics_step(action_tensor)
+
+
+        # compute observations, rewards, resets, ...
+        self.post_physics_step()
+
+        self.control_steps += 1
+
+
+        self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)}
+
+        if self.obs_history:
+            self.obs_dict["obs"]["state_history"] = torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
+
+    def post_physics_step(self):
+
+        self.gait_indices = torch.remainder(self.gait_indices + self.dt * 3.0, 1.0)
+
+        foot_indices = [self.gait_indices + self.phases + self.offsets + self.bounds,
+                            self.gait_indices + self.offsets,
+                            self.gait_indices + self.bounds,
+                            self.gait_indices + self.phases]
+
+        self.foot_indices = torch.remainder(torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0)
+
+        # print("clock", self.clock_inputs)
+        # print("foots", self.foot_indices)
+
+        # have bug???
+        self.clock_inputs[:, 0] = torch.sin(2 * np.pi * self.foot_indices[:, 0])
+        self.clock_inputs[:, 1] = torch.sin(2 * np.pi * self.foot_indices[:, 1])
+        self.clock_inputs[:, 2] = torch.sin(2 * np.pi * self.foot_indices[:, 2])
+        self.clock_inputs[:, 3] = torch.sin(2 * np.pi * self.foot_indices[:, 3])
+
+
+        self.compute_observations()
+        self.compute_reward(self.actions)
+
+        rpy = self.agents[self.control_agent_name].se.get_rpy()
+        if abs(rpy[0]) > 1.6 or abs(rpy[1]) > 1.6:
+            self.calibrate(wait=False, low=True)
+
+
+        if self.command_profile.state_estimator.right_lower_right_switch_pressed:
+            self.calibrate(wait=False)
+            time.sleep(1)
+            self.command_profile.state_estimator.right_lower_right_switch_pressed = False
+            # self.button_states = self.command_profile.get_buttons()
+            while not self.command_profile.state_estimator.right_lower_right_switch_pressed:
+                time.sleep(0.01)
+                # self.button_states = self.command_profile.get_buttons()
+            self.command_profile.state_estimator.right_lower_right_switch_pressed = False
+
+    def compute_reward(self, actions):
+        self.rew_buf[0] = 0
+
+    def compute_observations(self):
+        obs = self.agents["hardware_closed_loop"].get_obs()
+
+
+
+
+        gravity_vec = obs[:,0:3]
+        commands = obs[:,3:6]
+        print("command:", commands)
+        dof_pos = obs[:,6:18]
+        dof_vel = obs[:,18:30]
+        actions = obs[:,30:42] # actions are not used in real robot
+        # print("=== actions: ", actions)
+        contact_states = obs[:,42:46]
+
+        # print("=== gravity_vec: ", gravity_vec)
+        # print("=== contact_states: ", contact_states)
+
+        lin_vel_scale = self.lin_vel_scale
+        ang_vel_scale = self.ang_vel_scale
+        dof_pos_scale = self.dof_pos_scale
+        dof_vel_scale = self.dof_vel_scale
+
+
+        projected_gravity = gravity_vec
+        dof_pos_scaled = dof_pos * dof_pos_scale
+        dof_vel_scaled = dof_vel * dof_vel_scale
+        commands_scaled = commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=commands.device)
+
+
+        obs = torch.cat((
+            #base_lin_vel,
+            #base_ang_vel,
+            projected_gravity,
+            commands_scaled,
+            dof_pos_scaled,
+            dof_vel_scaled,
+            actions,
+            self.clock_inputs
+            # self.actions,
+            # contact_states
+        ), dim=-1)
+
+        self.obs_buf[:] = obs
+
+        if self.obs_history:
+            self.history_buffer[:] = torch.cat((obs, self.history_buffer[:, self.num_obs:]), dim=1)
 
 
     def reset_idx(self, env_ids):
         pass
 
+    def reset_gait_indices(self, env_ids=None):
+        self.gait_indices = torch.zeros(self.num_envs, device=self.device,dtype=torch.float) 
+
+        self.clock_inputs = torch.zeros((self.num_envs, 4), device=self.device,dtype=torch.float)
+        if self.obs_history:
+            assert self.num_obs == 46, "total_obs_dim should be 43"
+            zero_obs = torch.zeros(self.num_obs, dtype=torch.float32, device=self.device)
+            zero_obs[2] = -1 # default gravity
+            self.history_per_begin = torch.tile(zero_obs, (self.history_length,))
+            self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs,1))
+
+
+    def reset(self):
+        """Is called only once when environment starts to provide the first observations.
+        Doesn't calculate observations. Actual reset and observation calculation need to be implemented by user.
+        Returns:
+            Observation dictionary
+        """
+        self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)}
+
+        if self.obs_history:
+            self.obs_dict["obs"]["state_history"] = torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+        # asymmetric actor-critic
+        if self.num_states > 0:
+            self.obs_dict["states"] = self.get_state()
+
+        return self.obs_dict

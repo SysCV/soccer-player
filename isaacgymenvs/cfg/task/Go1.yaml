@@ -4,12 +4,13 @@ name: Go1
 physics_engine: ${..physics_engine}
 
 env:
-  numEnvs: ${resolve_default:4096,${...num_envs}}
+  numEnvs: ${resolve_default:8000,${...num_envs}}
   envSpacing: 2.  # [m]
 
   wandb_extra_log: True
-  wandb_extra_log_period: 2000
-  randomization_freq: 5000
+  wandb_extra_log_period: 4000
+
+  randomization_freq: 10000 # 1s = 50 steps
 
   obs_history: true
   history_length: 30
@@ -62,11 +63,16 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
-    linear_x: [-3.0, 3.0] # min max [m/s]
+    linear_x: [ -3.0, 3.0] # min max [m/s]
+    linear_x_init: [ -0.5, 1.0] # min max [m/s]
     num_bins_x: 11 # 20
+
     linear_y: [ -0.5, 0.5]   # min max [m/s]
+    linear_y_init: [ -0.5, 0.5]   # min max [m/s]
     num_bins_y: 1 # 20
+
     yaw: [ -1.0, 1.0]          # min max [rad/s]
+    yaw_init: [ -0.3, 0.3]          # min max [rad/s]
     num_bins_yaw: 11 # 5
 
   control:
@@ -77,7 +83,6 @@ env:
     actionScale: 0.5
     hipAddtionalScale: 0.5
     controlFrequencyInv: 1 # control step every dt
-    # todo: change to a1 param?
 
   random_params:
     stiffness:
@@ -86,16 +91,20 @@ env:
       range_high: 25.
     friction:
       enable: true
-      range_low: 0.4
-      range_high: 1.2
+      range_low: 0.1
+      range_high: 4.0
     restitution:
       enable: true
       range_low: 0.0
-      range_high: 0.6
+      range_high: 0.4
     payload:
       enable: true
       range_low: -1.0
       range_high: 2.0
+    push:
+      enable: true
+      interval_s: 7
+      max_vel: 0.5
 
   defaultJointAngles:  # = target angles when action = 0.0
     FL_hip_joint: 0.1   # [rad]
@@ -121,17 +130,17 @@ env:
 
   rewards:
     only_positive_rewards_ji22_style: True
-    sigma_rew_neg: 5.0
+    sigma_rew_neg: 0.02 # is important!!
     
     rewardScales:
       tracking_lin_vel: 1.0
       tracking_ang_vel: 0.5
-      feet_air_time: 1.0
+      # feet_air_time: 1.0
 
-      orientation: -0.000001
-      lin_vel_z: -1.0
+      orientation: -5.0
+      lin_vel_z: -0.02
       
-      dof_pos: -0.0001
+      dof_acc: -2.5e-7
       dof_vel: -0.0001
       torque: -0.0001
 
@@ -142,7 +151,7 @@ env:
 
       base_height: -0.001
 
-      # walk this way
+      # walk this way, this replace the feet air time
       tracking_contacts_shaped_force: 4.0
       tracking_contacts_shaped_vel: 4.0
 
@@ -168,11 +177,12 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 15
+    episodeLength_s: 20
+    
     curriculum:
       resample_s: 5
-      success_threshold: 3.
-      local_range: [0.6,0.3,0.3]
+      success_threshold: 1.0
+      local_range: [1.0,0.5,0.3]
 
   # viewer cam:
   viewer:

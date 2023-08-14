@@ -2,13 +2,13 @@ params:
   seed: ${...seed}
 
   algo:
-    name: a2c_continuous
+    name: rma_ac
 
   model:
-    name: continuous_a2c_logstd
+    name: continuous_rma
 
   network:
-    name: actor_critic_history
+    name: actor_critic_rma
     separate: False
 
     space:
@@ -23,7 +23,7 @@ params:
         fixed_sigma: True
 
     mlp:
-      units: [256, 128, 64]
+      units: [512, 256, 128]
       activation: elu
       d2rl: False
 
@@ -33,7 +33,17 @@ params:
         name: None
 
     history:
-      units: [256, 32, 8]
+      units: [256, 32]
+      activation: elu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+    privilige:
+      units: [8]
       activation: elu
       d2rl: False
 
@@ -71,9 +81,13 @@ params:
     minibatch_size: 64000 # 8000 * 24 / 3 = 64000
     mini_epochs: 5
     critic_coef: 2
+
     clip_value: True
     seq_len: 4 # only for rnn
+
     bounds_loss_coef: 0.001
+    estimate_coef: 0.0
+    estimate_ratio: 0.98 # should be close to 1
 
     max_epochs: ${resolve_default:2000,${....max_iterations}}
     save_best_after: 200

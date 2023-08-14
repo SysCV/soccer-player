@@ -90,6 +90,10 @@ class RewardTerms:
             reward += - (desired_contact[:, i] * (
                         1 - torch.exp(-1 * foot_velocities[:, i] ** 2 / self.env.reward_params["tracking_contacts_shaped_vel"]["sigma"])))
         return reward / 4
+    
+    def _reward_dof_acc(self):
+        # Penalize dof accelerations
+        return torch.sum(torch.square((self.env.last_dof_vel - self.env.dof_vel) / self.env.dt), dim=1)
 
     
 

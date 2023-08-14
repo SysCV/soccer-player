@@ -268,7 +268,7 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
         total_time = update_time_end - play_time_start
 
         log_dict={}
-        log_dict["losses/system_identification_loss"] = torch_ext.mean_list(e_losses).item()
+        log_dict["losses/system_identification_loss"] = self.estimate_coef * torch_ext.mean_list(e_losses).item()
 
         return batch_dict['step_time'], play_time, update_time, total_time, a_losses, c_losses, b_losses, entropies, kls, last_lr, lr_mul, log_dict
 

@@ -136,7 +136,7 @@ if __name__ == '__main__':
 
     assert r._raw_grid.shape == (3, 5, 6, 11), "grid shape is wrong: {}".format(r.grid.shape)  # the first dimension is (x, y, z)
 
-    low, high = torch.tensor([-1, -1, -1], device='cuda:0'), torch.tensor([1, 1, 1], device='cuda:0')
+    low, high = torch.tensor([-1, -0.2, 0], device='cuda:0'), torch.tensor([0, 0.2, 1], device='cuda:0')
     
     # r.set_to([-0.2, -0.6, -0.2], [0.2, 0.6, 0.2], value=1.0)
     
@@ -147,7 +147,7 @@ if __name__ == '__main__':
     plt.scatter(*samples.T[0:2].cpu())
     plt.show()
 
-    plt.imshow(torch.mean(r.weights_shaped, dim=2).cpu(), cmap='gray',vmin=-1,vmax=1)
+    plt.imshow(torch.mean(r.weights_shaped, dim=1).cpu(), cmap='gray',vmin=-1,vmax=1)
     plt.xticks([0,4],["-2","2"])
     plt.show()
 
