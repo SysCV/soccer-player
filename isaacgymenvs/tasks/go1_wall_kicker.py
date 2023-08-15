@@ -231,6 +231,7 @@ class Go1WallKicker(VecTask):
 
         
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
+        self.set_actor_root_state_tensor_indexed()
         # print ("Go1WallKicker init done by gymenv!!")
 
     def create_sim_monitor(self):

@@ -98,7 +98,7 @@ from isaacgym.torch_utils import *
 from isaacgymenvs.tasks.base.vec_task import VecTask
 from isaacgymenvs.tasks.curricula.curriculum_torch import RewardThresholdCurriculum
 
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, List
 
 import sys
 import time
@@ -126,6 +126,19 @@ class Go1(VecTask):
         self.offsets =  self.cfg["env"]["gait_condition"]["offsets"]
         self.bounds =  self.cfg["env"]["gait_condition"]["bounds"]
         self.kappa = self.cfg["env"]["gait_condition"]["kappa"] # from walk these ways
+
+
+        self.add_noise = self.cfg["env"]["add_noise"]
+        noise_list = [
+            torch.ones(self.cfg["env"]["obs_num"]["gravity"], device=rl_device) * self.cfg["env"]["obs_noise"]["gravity"],
+            torch.ones(self.cfg["env"]["obs_num"]["command"], device=rl_device) * self.cfg["env"]["obs_noise"]["command"],
+            torch.ones(self.cfg["env"]["obs_num"]["dof_p"], device=rl_device) * self.cfg["env"]["obs_noise"]["dof_p"],
+            torch.ones(self.cfg["env"]["obs_num"]["dof_v"], device=rl_device) * self.cfg["env"]["obs_noise"]["dof_v"],
+            torch.ones(self.cfg["env"]["obs_num"]["pre_act"], device=rl_device) * self.cfg["env"]["obs_noise"]["pre_act"],
+            torch.ones(self.cfg["env"]["obs_num"]["gait_sin_indict"], device=rl_device) * self.cfg["env"]["obs_noise"]["gait_sin_indict"],
+        ]
+
+        self.noise_vec = torch.cat(noise_list)
 
 
         # reward scales
@@ -207,7 +220,9 @@ class Go1(VecTask):
 
 
         # curricula
-        self.curri_resample_length = int(self.cfg["env"]["learn"]["curriculum"]["resample_s"]/self.dt + 0.5)
+        self.command_s = self.cfg["env"]["learn"]["curriculum"]["resample_s"]
+        self.curri_resample_length = int(self.command_s/self.dt + 0.5)
+        self.curriculum_thresholds = self.cfg["env"]["learn"]["curriculum"]["success_threshold"]
 
         self.rand_push = self.cfg["env"]["random_params"]["push"]["enable"]
         self.rand_push_length = int(self.cfg["env"]["random_params"]["push"]["interval_s"]/self.dt + 0.5)
@@ -215,7 +230,6 @@ class Go1(VecTask):
 
 
 
-        self.task_rewards_threshold = self.cfg["env"]["learn"]["curriculum"]["success_threshold"] * self.cfg["env"]["learn"]["curriculum"]["resample_s"]
         local_range = self.cfg["env"]["learn"]["curriculum"]["local_range"]
         self.curri_local_range=torch.tensor(
                                       local_range, device=self.device)
@@ -232,6 +246,7 @@ class Go1(VecTask):
         self.init_curriculum()
 
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
+        self.set_actor_root_state_tensor_indexed()
 
     def init_curriculum(self):
         # init curriculum
@@ -264,8 +279,6 @@ class Go1(VecTask):
         _, self.env_command_bins = self.curriculum.sample_bins(self.num_envs)
 
 
-        # calculate for curriculum update
-        self.task_rewards_for_curri = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
 
     def get_wrapped_tensor(self):
         # default gait
@@ -325,8 +338,9 @@ class Go1(VecTask):
         self.initial_root_states[:] = to_torch(self.base_init_state, device=self.device, requires_grad=False)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
-        self.last_last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.targets = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.last_targets = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.last_last_targets = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         
         self.feet_air_time = torch.zeros(self.num_envs, 4 ,dtype=torch.float, device=self.device, requires_grad=False)
         self.contact_state = torch.zeros(self.num_envs, 4, dtype=torch.bool, device=self.device, requires_grad=False)
@@ -348,6 +362,7 @@ class Go1(VecTask):
 
 
         self.step_counter = 0
+        self.actor_indices_for_reset: List[torch.Tensor] = []
 
 
 
@@ -370,6 +385,40 @@ class Go1(VecTask):
         # If randomizing, apply once immediately on startup before the fist sim step
         if self.randomize:
             self.apply_randomizations(self.randomization_params)
+
+    def set_viewer(self):
+        """Create the viewer."""
+
+        # todo: read from config
+        self.enable_viewer_sync = True
+        self.viewer = None
+
+        # if running with a viewer, set up keyboard shortcuts and camera
+        if self.headless == False:
+            viewer_prop = gymapi.CameraProperties()
+            viewer_prop.use_collision_geometry = True
+            viewer_prop.far_plane = 30.
+            # subscribe to keyboard shortcuts
+            self.viewer = self.gym.create_viewer(
+                self.sim, viewer_prop)
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_ESCAPE, "QUIT")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_V, "toggle_viewer_sync")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_R, "record_frames")
+
+            # set the camera position based on up axis
+            sim_params = self.gym.get_sim_params(self.sim)
+            if sim_params.up_axis == gymapi.UP_AXIS_Z:
+                cam_pos = gymapi.Vec3(20.0, 25.0, 3.0)
+                cam_target = gymapi.Vec3(10.0, 15.0, 0.0)
+            else:
+                cam_pos = gymapi.Vec3(20.0, 3.0, 25.0)
+                cam_target = gymapi.Vec3(10.0, 0.0, 15.0)
+
+            self.gym.viewer_camera_look_at(
+                self.viewer, None, cam_pos, cam_target)
 
 
     def _create_ground_plane(self):
@@ -478,8 +527,8 @@ class Go1(VecTask):
         self.default_mass = self.gym.get_actor_rigid_body_properties(self.envs[0], self.a1_handles[0])[self.base_index].mass
 
     def pre_physics_step(self, actions):
-        self.last_last_actions = self.last_actions.clone()
-        self.last_actions = self.actions.clone()
+        self.last_last_targets = self.last_targets.clone()
+        self.last_targets = self.targets.clone()
         self.last_dof_vel = self.dof_vel.clone()
         self.actions = actions.clone().to(self.device)
 
@@ -487,9 +536,9 @@ class Go1(VecTask):
         actions_scaled[:, [0, 3, 6, 9]] *= self.hip_addtional_scale
 
         self.lag_buffer = self.lag_buffer[1:] + [actions_scaled.clone()]
-        targets = self.lag_buffer[0] + self.default_dof_pos
+        self.targets = self.lag_buffer[0] + self.default_dof_pos
 
-        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
+        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.targets))
 
     def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Step the physics of the environment.
@@ -555,16 +604,19 @@ class Go1(VecTask):
 
         resample_ids = (self.progress_buf % self.curri_resample_length == 0).nonzero(as_tuple=False).flatten()
 
-        push_ids =  (self.progress_buf % self.rand_push_length == 0).nonzero(as_tuple=False).flatten()
+        if self.rand_push:
+            push_ids =  (self.progress_buf % self.rand_push_length == 0).nonzero(as_tuple=False).flatten()
 
-        if len(push_ids) > 0:
-            self._push_robots(push_ids)
+            if len(push_ids) > 0:
+                self._push_robots(push_ids)
 
         if len(resample_ids) > 0:
             self.resample_commands(resample_ids)
 
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
+
+        self.set_actor_root_state_tensor_indexed()
 
         self.refresh_buffers()
         self._step_contact_targets()
@@ -581,12 +633,11 @@ class Go1(VecTask):
     def _push_robots(self, env_ids):
         """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity.
         """
-        if self.rand_push:
 
 
-            self.root_states[env_ids, 7:9] = torch_rand_float(-self.max_push_vel, self.max_push_vel, (len(env_ids), 2),
-                                                              device=self.device)  # lin vel x/y
-            self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(self.root_states))
+        self.root_states[env_ids, 7:9] += torch_rand_float(-self.max_push_vel, self.max_push_vel, (len(env_ids), 2),
+                                                          device=self.device)  # lin vel x/y
+        self.deferred_set_actor_root_state_tensor_indexed(env_ids)
 
     def compute_reward(self, actions):
         """ Compute rewards
@@ -606,13 +657,21 @@ class Go1(VecTask):
             elif torch.sum(rew) <= 0:
                 self.rew_neg += rew
             episode_cumulative[name] = rew
+
+            # if name == 'tracking_lin_vel':
+            #     print("max velocity",torch.max(self.reward_functions[i]()).item(), self.reward_scales[name])
+                
+
+            if name in ['tracking_contacts_shaped_force', 'tracking_contacts_shaped_vel']:
+                self.command_sums[name] += self.reward_scales[name] + rew
+            else:
+                self.command_sums[name] += rew
         
 
         if self.postive_reward_ji22:
             self.rew_buf[:] = self.rew_pos[:] * torch.exp(self.rew_neg[:] / self.sigma_rew_neg)
         else:
             self.rew_buf = self.rew_pos + self.rew_neg
-        self.task_rewards_for_curri += self.rew_buf
         extra_info["episode_cumulative"] = episode_cumulative
         self.extras.update(extra_info)
 
@@ -662,6 +721,9 @@ class Go1(VecTask):
             self.actions,
             self.clock_inputs,
         ), dim=-1)
+
+        if self.add_noise:
+            obs += (2 * torch.rand_like(obs) - 1) * self.noise_vec
 
         self.obs_buf[:] = obs
 
@@ -731,13 +793,32 @@ class Go1(VecTask):
         old_bins = self.env_command_bins[env_ids]
         # print("old_bins_is",old_bins)
 
-        self.curriculum.update(old_bins, [self.task_rewards_for_curri[env_ids]], [self.task_rewards_threshold],
+        task_rewards, success_thresholds = [], []
+        for key in ["tracking_lin_vel", "tracking_ang_vel", "tracking_contacts_shaped_force",
+                    "tracking_contacts_shaped_vel"]:
+            if key in self.command_sums.keys():
+                task_rewards.append(self.command_sums[key][env_ids] / self.curri_resample_length) # because scale have additional dt
+                success_thresholds.append(self.curriculum_thresholds[key] * self.reward_scales[key])
+                # print("========================")
+
+                # print("max command sums = ",key,torch.max(self.command_sums[key][env_ids]).item() / self.curri_resample_length)
+                # print("command standard = ",key,self.curriculum_thresholds[key]* self.reward_scales[key])
+                # print("resample length", self.curri_resample_length)
+                # print("scales",key,self.reward_scales[key])
+
+        self.curriculum.update(old_bins, task_rewards, success_thresholds,
                                 local_range=self.curri_local_range)
 
         new_commands, new_bin_inds = self.curriculum.sample(batch_size=len(env_ids))
         self.env_command_bins[env_ids] = new_bin_inds
         self.commands[env_ids] = new_commands[:, :].to(self.device)
-        self.task_rewards_for_curri[env_ids] = 0
+
+        # setting the smaller commands to zero
+        self.commands[env_ids, :2] *= (torch.norm(self.commands[env_ids, :2], dim=1) > 0.2).unsqueeze(1)
+
+
+        for key in self.command_sums.keys():
+            self.command_sums[key][env_ids] = 0.
         
 
 
@@ -757,9 +838,9 @@ class Go1(VecTask):
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
 
-        self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                         gymtorch.unwrap_tensor(self.initial_root_states),
-                                                         gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        self.root_states[env_ids, :] = self.initial_root_states[env_ids, :]
+
+        self.deferred_set_actor_root_state_tensor_indexed(env_ids)
 
 
         self.gym.set_dof_state_tensor_indexed(self.sim,
@@ -769,8 +850,8 @@ class Go1(VecTask):
         self.gait_indices[env_ids] = 0
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
-        self.last_actions[env_ids] = 0.
-        self.last_last_actions[env_ids] = 0.
+        self.last_targets[env_ids] = 0.
+        self.last_last_targets[env_ids] = 0.
 
         self.feet_air_time[env_ids,:] = 0. 
         self.contact_state[env_ids,:] = 0.
@@ -780,6 +861,9 @@ class Go1(VecTask):
         
         for i in range(len(self.lag_buffer)):
             self.lag_buffer[i][env_ids, :] = 0
+
+        for key in self.command_sums.keys():
+            self.command_sums[key][env_ids] = 0.
 
     def reset(self):
         """Is called only once when environment starts to provide the first observations.
@@ -845,11 +929,11 @@ class Go1(VecTask):
         #     for name in self.reward_scales.keys()}
         # self.episode_sums_eval["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
         #                                               requires_grad=False)
-        # self.command_sums = {
-        #     name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
-        #     for name in
-        #     list(self.reward_scales.keys()) + ["lin_vel_raw", "ang_vel_raw", "lin_vel_residual", "ang_vel_residual",
-        #                                        "ep_timesteps"]}
+        self.command_sums = {
+            name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+            for name in
+            list(self.reward_scales.keys()) + ["lin_vel_raw", "ang_vel_raw", "lin_vel_residual", "ang_vel_residual",
+                                               "ep_timesteps"]}
 
     def _step_contact_targets(self):
         self.gait_indices = torch.remainder(self.gait_indices + self.dt * self.frequencies, 1.0)
@@ -922,3 +1006,23 @@ class Go1(VecTask):
         self.desired_contact_states[:, 1] = smoothing_multiplier_FR
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
+
+    def deferred_set_actor_root_state_tensor_indexed(self, obj_indices: List[torch.Tensor]) -> None:
+        self.actor_indices_for_reset.append(obj_indices)
+
+    def set_actor_root_state_tensor_indexed(self) -> None:
+        object_indices: List[torch.Tensor] = self.actor_indices_for_reset
+        if not object_indices:
+            # nothing to set
+            return
+        # print("index list:", object_indices)
+        unique_object_indices = torch.unique(torch.cat(object_indices).to(torch.int32))
+
+        self.gym.set_actor_root_state_tensor_indexed(
+            self.sim,
+            gymtorch.unwrap_tensor(self.root_states),
+            gymtorch.unwrap_tensor(unique_object_indices),
+            len(unique_object_indices),
+        )
+
+        self.actor_indices_for_reset = []

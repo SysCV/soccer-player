@@ -116,9 +116,10 @@ class RewardThresholdCurriculum(TorchCurriculum):
         return adjacent_inds
 
     def update(self, bin_inds, task_rewards, success_thresholds, local_range=0.5):
-        is_success = 1.0
+        is_success = True
         for task_reward, success_threshold in zip(task_rewards, success_thresholds):
-            is_success =  task_reward > success_threshold
+            is_success =  (task_reward > success_threshold) & is_success
+        
         if len(success_thresholds) == 0:
             is_success = torch.tensor([False] * len(bin_inds), device=self.device)
         else:

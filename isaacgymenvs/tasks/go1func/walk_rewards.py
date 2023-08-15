@@ -31,19 +31,19 @@ class RewardTerms:
     
     def _reward_action_rate(self):
         # Penalize changes in actions
-        return torch.sum(torch.square(self.env.last_actions - self.env.actions), dim=1)
+        return torch.sum(torch.square(self.env.last_targets - self.env.actions), dim=1)
     
     def _reward_action_smoothness_1(self):
         # Penalize changes in actions
-        diff = torch.square(self.env.last_actions - self.env.actions)
-        diff = diff * (self.env.last_actions != 0)  # ignore first step
+        diff = torch.square(self.env.last_targets - self.env.targets)
+        diff = diff * (self.env.last_targets != 0)  # ignore first step
         return torch.sum(diff, dim=1)
 
     def _reward_action_smoothness_2(self):
         # Penalize changes in actions
-        diff = torch.square(self.env.actions - 2 * self.env.last_actions + self.env.last_last_actions)
-        diff = diff * (self.env.last_actions != 0)  # ignore first step
-        diff = diff * (self.env.last_last_actions != 0)  # ignore second step
+        diff = torch.square(self.env.targets - 2 * self.env.last_targets + self.env.last_last_targets)
+        diff = diff * (self.env.last_targets != 0)  # ignore first step
+        diff = diff * (self.env.last_last_targets != 0)  # ignore second step
         return torch.sum(diff, dim=1)
 
     

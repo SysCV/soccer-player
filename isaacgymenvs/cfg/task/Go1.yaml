@@ -8,17 +8,18 @@ env:
   envSpacing: 2.  # [m]
 
   wandb_extra_log: True
-  wandb_extra_log_period: 4000
+  wandb_extra_log_period: 8000
 
   randomization_freq: 10000 # 1s = 50 steps
 
   obs_history: true
-  history_length: 30
+  history_length: 15
 
 
-  action_lag_step: 0
+  action_lag_step: 6
 
   observe_contact_states: false
+
   obs_num:
     # base_v: 3
     # base_w: 3
@@ -29,6 +30,15 @@ env:
     pre_act: 12
     gait_sin_indict: 4
     # contact_state: 4
+
+  add_noise: true
+  obs_noise:
+    gravity: 0.05
+    command: 0
+    dof_p: 0.01
+    dof_v: 1.5
+    pre_act: 0
+    gait_sin_indict: 0
 
   gait_condition:
     # trotting [0.5,0,0] pacing [0,0,0.5]
@@ -63,17 +73,17 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
-    linear_x: [ -3.0, 3.0] # min max [m/s]
-    linear_x_init: [ -0.5, 1.0] # min max [m/s]
-    num_bins_x: 11 # 20
+    linear_x: [ -5.0, 5.0] # min max [m/s]
+    linear_x_init: [ -1.0, 1.0] # min max [m/s]
+    num_bins_x: 21 # 20
 
-    linear_y: [ -0.5, 0.5]   # min max [m/s]
-    linear_y_init: [ -0.5, 0.5]   # min max [m/s]
+    linear_y: [ -0.6, 0.6]   # min max [m/s]
+    linear_y_init: [ -0.6, 0.6]   # min max [m/s]
     num_bins_y: 1 # 20
 
-    yaw: [ -1.0, 1.0]          # min max [rad/s]
-    yaw_init: [ -0.3, 0.3]          # min max [rad/s]
-    num_bins_yaw: 11 # 5
+    yaw: [ -5.0, 5.0]          # min max [rad/s]
+    yaw_init: [ -1.0, 1.0]          # min max [rad/s]
+    num_bins_yaw: 21 # 5
 
   control:
     type: "pose_pd" # pose_pd / actuator_net
@@ -144,7 +154,7 @@ env:
       dof_vel: -0.0001
       torque: -0.0001
 
-      action_rate: -0.01
+      # action_rate: -0.01
       # now is the same as action_rate, but when have lag, it will be different
       action_smoothness_1: -0.1
       action_smoothness_2: -0.1
@@ -181,8 +191,12 @@ env:
     
     curriculum:
       resample_s: 5
-      success_threshold: 1.0
-      local_range: [1.0,0.5,0.3]
+      success_threshold:
+        tracking_lin_vel: 0.7
+        tracking_ang_vel: 0.8
+        tracking_contacts_shaped_force: 0.9
+        tracking_contacts_shaped_vel: 0.9
+      local_range: [0.6,0.6,0.6]
 
   # viewer cam:
   viewer:
