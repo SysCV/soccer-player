@@ -8,7 +8,7 @@ env:
   numEnvs: ${resolve_default:20,${...num_envs}}
   envSpacing: 2.  # [m]
 
-  cameraSensorPlt: false
+  cameraSensorPlt: true
 
   state_obs: false
   state_observations:
@@ -28,9 +28,9 @@ env:
 
   pixel_observations:
     enable: true
-    width: 224
-    height: 224
-    cam_range: 130
+    height: 624
+    width: 624
+    cam_range: 140
     history: 1
 
   priviledgeStates:
@@ -61,9 +61,9 @@ env:
     restitution: 0.9       # [-]
 
   baseInitState:
-    pos: [0.0, 0.0, 0.34] # x,y,z [m]
+    pos: [0.0, 0.0, 0.50] # x,y,z [m]
     rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
-    vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
+    vLinear: [0.2, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   goalInitState:
@@ -75,16 +75,16 @@ env:
     randomPosRange: [ 0.0, 0.0, 0.0]
 
   ballInitState:
-    pos: [ 0.6, 0.0, 0.12 ] # x,y,z [m]
+    pos: [ 0.3, 0.0, 0.92 ] # x,y,z [m]
     randomPosRange: [ 0.2, 0.5, 0. ]
-    # ballInitSpeed: 0.0 # [m/s]
+    # ballInitSpeed: -1.0 # [m/s]
     mass: 0.05 # [kg]
 
   randomBallStateRanges:
     pos_x: [-0.5, 0.5] # min max [m]
     pos_y: [-0.5, 0.5] # min max [m]
-    v_x: [-0.5, 0.5] # min max [m/s]
-    v_y: [-0.5, 0.5] # min max [m/s]
+    v_x: [-2.5, 2.5] # min max [m/s]
+    v_y: [-2.5, 2.5] # min max [m/s]
 
   randomCommandVelocityRanges:
     linear_x: [-2., 2.] # min max [m/s]

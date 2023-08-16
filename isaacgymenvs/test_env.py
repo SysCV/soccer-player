@@ -6,14 +6,15 @@ num_envs = 1
 
 envs = isaacgymenvs.make(
 	seed=0, 
-	task="Go1WallKicker", 
+	task="Ant", 
 	num_envs=num_envs, 
-	sim_device="cuda:0",
-	rl_device="cuda:0",
+	sim_device="cuda:2",
+	rl_device="cuda:2",
 	headless=False,
 	force_render=False,
 	graphics_device_id=0,
 )
+
 print("Observation space is", envs.observation_space)
 print("Action space is", envs.action_space)
 obs = envs.reset()

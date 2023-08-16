@@ -28,6 +28,7 @@
 
 # ======== Asset info unitree go1: ========
 # Got 17 bodies, 16 joints, and 12 DOFs
+
 # Bodies:
 #   0: 'base'
 #   1: 'FL_hip'
@@ -46,6 +47,7 @@
 #  14: 'RR_thigh'
 #  15: 'RR_calf'
 #  16: 'RR_foot'
+
 # Joints:
 #   0: 'FL_hip_joint' (Revolute)
 #   1: 'FL_thigh_joint' (Revolute)
@@ -63,6 +65,7 @@
 #  13: 'RR_thigh_joint' (Revolute)
 #  14: 'RR_calf_joint' (Revolute)
 #  15: 'RR_foot_fixed' (Fixed)
+
 # DOFs:
 #   0: 'FL_hip_joint' (Rotation)
 #   1: 'FL_thigh_joint' (Rotation)
@@ -80,6 +83,7 @@
 import numpy as np
 import os
 import torch
+import math
 import matplotlib.pyplot as plt
 
 from gym import spaces
@@ -90,8 +94,11 @@ from isaacgym.torch_utils import *
 from isaacgym import gymutil
 
 from isaacgymenvs.tasks.base.vec_task import VecTask
+import isaacgymenvs.tasks.go1func.quadric_utils  as quadric_utils
 
 from isaacgymenvs.utils.torch_jit_utils import calc_heading
+
+
 
 from typing import Dict, Any, Tuple, List, Set
 
@@ -184,13 +191,25 @@ class Go1WallKicker(VecTask):
 
         self.cfg["env"]["numActions"] = self.cfg["env"]["actions_num"]
 
+        self.cam_range = self.cfg["env"]["pixel_observations"]["cam_range"]
+        self.image_width = self.cfg["env"]["pixel_observations"]["width"]
+        self.image_height = self.cfg["env"]["pixel_observations"]["height"]
+
+
+        fx = (self.image_width / 2) / math.tan(math.radians(self.cam_range / 2))
+        fy = (self.image_height / 2) / math.tan(math.radians(self.cam_range / 2))
+
+        self.K_torch = torch.tensor([[fx, 0, self.image_width / 2],
+                                [0, fy, self.image_height / 2],
+                                [0, 0, 1]], dtype=torch.float32, device=sim_device)
+
         # here call _creat_ground and _creat_env
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
         # rewrite obs space
         if self.pixel_obs:
             self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf),
-                                     "pixel_obs":spaces.Box(low=0, high=255, shape=(224, 224, 3), dtype=np.uint8),
+                                     "pixel_obs":spaces.Box(low=0, high=255, shape=(self.image_height, self.image_width, 3), dtype=np.uint8),
                                     })
             
         if self.state_obs:
@@ -212,8 +231,7 @@ class Go1WallKicker(VecTask):
         self.max_stable_length = int(self.max_stable_length_s / self.dt + 0.5)
         self.max_onground_length = int(self.max_onground_length_s / self.dt + 0.5)
 
-        image_width = self.cfg["env"]["pixel_observations"]["width"]
-        image_height = self.cfg["env"]["pixel_observations"]["height"]
+
         # image_num = self.cfg["env"]["pixel_observations"]["history"]
         # image_channels = 3
         # self.history_images = torch.zeros([self.num_envs, image_num, image_height, image_width, image_channels], dtype=torch.uint8, device=self.device)
@@ -234,19 +252,24 @@ class Go1WallKicker(VecTask):
         self.set_actor_root_state_tensor_indexed()
         # print ("Go1WallKicker init done by gymenv!!")
 
+
     def create_sim_monitor(self):
         # get gym state tensors
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
         torques = self.gym.acquire_dof_force_tensor(self.sim)
+        rigid_body_state = self.gym.acquire_rigid_body_state_tensor(self.sim)
 
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_dof_force_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         # create some wrapper tensors for different slices
+        self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[:self.num_envs * (self.num_bodies + 3), :]
+        self.base_body_state = self.rigid_body_state
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
@@ -280,7 +303,7 @@ class Go1WallKicker(VecTask):
 
         self.target_reset_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
 
-        self.camera_tensor_imgs_buf = torch.zeros([self.num_envs, 224, 224, 3], dtype=torch.uint8, device=self.device, requires_grad=False)
+        self.camera_tensor_imgs_buf = torch.zeros([self.num_envs, self.image_width, self.image_width, 3], dtype=torch.uint8, device=self.device, requires_grad=False)
 
         self.initial_root_states = self.root_states.clone()
         self.initial_root_states[:] = to_torch(self.base_init_state, device=self.device, requires_grad=False)
@@ -290,6 +313,9 @@ class Go1WallKicker(VecTask):
         self.actor_indices_for_reset: List[torch.Tensor] = []
         self.onground_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self.stable_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+
+        Qstar_element = torch.diag(torch.tensor([1., 1., 1., -1 / 0.1 **2],device=self.device))
+        self.dual_balls = Qstar_element.repeat(self.num_envs,1,1)
 
     def create_sim(self):
         self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
@@ -471,17 +497,17 @@ class Go1WallKicker(VecTask):
 
             if self.pixel_obs:
                 camera_properties = gymapi.CameraProperties()
-                camera_properties.horizontal_fov = 130.0
+                camera_properties.horizontal_fov = self.cam_range
                 camera_properties.enable_tensors = True
-                camera_properties.width = 224
-                camera_properties.height = 224
+                camera_properties.width = self.image_width
+                camera_properties.height = self.image_height
 
                 cam_handle = self.gym.create_camera_sensor(env_ptr, camera_properties)
-                camera_offset = gymapi.Vec3(0.3, 0, 0)
-                camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.deg2rad(20))
+                camera_offset = gymapi.Vec3(0.0, 0, 0)
+                # camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.deg2rad(20))
                 body_handle = self.gym.get_actor_rigid_body_handle(env_ptr, a1_handle, 0)
 
-                self.gym.attach_camera_to_body(cam_handle, env_ptr, body_handle, gymapi.Transform(camera_offset, camera_rotation),
+                self.gym.attach_camera_to_body(cam_handle, env_ptr, body_handle, gymapi.Transform(camera_offset),
                                           gymapi.FOLLOW_TRANSFORM)
                 self.camera_handles.append(cam_handle)
                 cam_tensor = self.gym.get_camera_image_gpu_tensor(self.sim, env_ptr, cam_handle, gymapi.IMAGE_COLOR)
@@ -638,7 +664,23 @@ class Go1WallKicker(VecTask):
 
         self.gym.end_access_image_tensors(self.sim)
 
+        root_states = self.root_states[:, :]
 
+        base_quat = root_states[::4, 3:7]
+        base_pose = root_states[::4, 0:3]
+        ball_pose = root_states[1::4, 0:3]
+
+        bboxes = quadric_utils.calc_projected_bbox(self.dual_balls, base_quat, base_pose, self.K_torch, ball_pose)
+
+        bbox_to_show = bboxes[0]
+
+        xmin, ymin, xmax, ymax = quadric_utils.convert_bbox_to_img_coord(
+            bbox_to_show[0].item(),
+            bbox_to_show[1].item(),
+            bbox_to_show[2].item(),
+            bbox_to_show[3].item(),
+            self.image_width,
+            self.image_height)
 
         if self.have_cam_window:
             if np.mod(self.frame_count, 1) == 0:
@@ -648,6 +690,7 @@ class Go1WallKicker(VecTask):
                 # whole_picture = torch.cat((up_row, low_row), dim=0)
                 # cam_img = whole_picture.cpu().numpy()
                 cam_img = self.camera_tensor_imgs_buf[0,:,:,:].cpu().numpy()
+                cam_img = quadric_utils.add_bbox_on_numpy_img(cam_img, xmin, ymin, xmax, ymax)
                 self.ax.imshow(cam_img)
                 plt.draw()
                 plt.pause(0.001)
@@ -659,6 +702,7 @@ class Go1WallKicker(VecTask):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_dof_force_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         # raw data
         
