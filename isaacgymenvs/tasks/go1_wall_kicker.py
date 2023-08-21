@@ -147,8 +147,8 @@ class Go1WallKicker(VecTask):
         self.randomize = self.cfg["task"]["randomize"]
 
         # command ranges
-        self.command_x_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"]
-        self.command_y_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"]
+        # self.command_x_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"]
+        # self.command_y_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"]
         # self.command_yaw_range = self.cfg["env"]["randomCommandVelocityRanges"]["yaw"]
 
         # plane params
@@ -210,9 +210,8 @@ class Go1WallKicker(VecTask):
         if self.pixel_obs:
             self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf),
                                      "pixel_obs":spaces.Box(low=0, high=255, shape=(self.image_height, self.image_width, 3), dtype=np.uint8),
-                                    })
-            
-        if self.state_obs:
+                                    })  
+        elif self.state_obs:
             self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
                                     })
 
@@ -252,6 +251,39 @@ class Go1WallKicker(VecTask):
         self.set_actor_root_state_tensor_indexed()
         # print ("Go1WallKicker init done by gymenv!!")
 
+    def set_viewer(self):
+        """Create the viewer."""
+
+        # todo: read from config
+        self.enable_viewer_sync = True
+        self.viewer = None
+
+        # if running with a viewer, set up keyboard shortcuts and camera
+        if self.headless == False:
+            viewer_prop = gymapi.CameraProperties()
+            viewer_prop.use_collision_geometry = True
+            viewer_prop.far_plane = 15.
+            # subscribe to keyboard shortcuts
+            self.viewer = self.gym.create_viewer(
+                self.sim, viewer_prop)
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_ESCAPE, "QUIT")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_V, "toggle_viewer_sync")
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_R, "record_frames")
+
+            # set the camera position based on up axis
+            sim_params = self.gym.get_sim_params(self.sim)
+            if sim_params.up_axis == gymapi.UP_AXIS_Z:
+                cam_pos = gymapi.Vec3(20.0, 25.0, 3.0)
+                cam_target = gymapi.Vec3(10.0, 15.0, 0.0)
+            else:
+                cam_pos = gymapi.Vec3(20.0, 3.0, 25.0)
+                cam_target = gymapi.Vec3(10.0, 0.0, 15.0)
+
+            self.gym.viewer_camera_look_at(
+                self.viewer, None, cam_pos, cam_target)
 
     def create_sim_monitor(self):
         # get gym state tensors
@@ -269,7 +301,8 @@ class Go1WallKicker(VecTask):
 
         # create some wrapper tensors for different slices
         self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[:self.num_envs * (self.num_bodies + 3), :]
-        self.base_body_state = self.rigid_body_state
+        self.base_body_state = self.rigid_body_state.view(self.num_envs, (self.num_bodies + 3), 13
+                                                          )[:, self.base_index, 0:8]
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
@@ -666,21 +699,14 @@ class Go1WallKicker(VecTask):
 
         root_states = self.root_states[:, :]
 
-        base_quat = root_states[::4, 3:7]
-        base_pose = root_states[::4, 0:3]
+        # base_quat = root_states[::4, 3:7]
+        # base_pose = root_states[::4, 0:3]
+
+        base_quat = self.base_body_state[:, 3:7]
+        base_pose = self.base_body_state[:, 0:3]
+
         ball_pose = root_states[1::4, 0:3]
 
-        bboxes = quadric_utils.calc_projected_bbox(self.dual_balls, base_quat, base_pose, self.K_torch, ball_pose)
-
-        bbox_to_show = bboxes[0]
-
-        xmin, ymin, xmax, ymax = quadric_utils.convert_bbox_to_img_coord(
-            bbox_to_show[0].item(),
-            bbox_to_show[1].item(),
-            bbox_to_show[2].item(),
-            bbox_to_show[3].item(),
-            self.image_width,
-            self.image_height)
 
         if self.have_cam_window:
             if np.mod(self.frame_count, 1) == 0:
@@ -689,6 +715,19 @@ class Go1WallKicker(VecTask):
                 # low_row = torch.cat([self.history_images[0,2,:,:,:],self.history_images[0,3,:,:,:]],dim=1)
                 # whole_picture = torch.cat((up_row, low_row), dim=0)
                 # cam_img = whole_picture.cpu().numpy()
+
+
+                bboxes = quadric_utils.calc_projected_bbox(self.dual_balls, base_quat, base_pose, self.K_torch, ball_pose)
+
+                bbox_to_show = bboxes[0]
+
+                xmin, ymin, xmax, ymax = quadric_utils.convert_bbox_to_img_coord(
+                    bbox_to_show[0].item(),
+                    bbox_to_show[1].item(),
+                    bbox_to_show[2].item(),
+                    bbox_to_show[3].item(),
+                    self.image_width,
+                    self.image_height)
                 cam_img = self.camera_tensor_imgs_buf[0,:,:,:].cpu().numpy()
                 cam_img = quadric_utils.add_bbox_on_numpy_img(cam_img, xmin, ymin, xmax, ymax)
                 self.ax.imshow(cam_img)
@@ -798,6 +837,10 @@ class Go1WallKicker(VecTask):
         goal_p = root_states[2::4, 0:3] - root_states[0::4, 0:3]
         ball_states_p = root_states[1::4, 0:3] - root_states[0::4, 0:3]
         ball_states_v = root_states[1::4, 7:10]
+
+        goal_p = quat_rotate_inverse(base_quat, goal_p)
+        ball_states_p = quat_rotate_inverse(base_quat, ball_states_p)
+        ball_states_v = quat_rotate_inverse(base_quat, ball_states_v)
 
         cat_list = []
         # check dict have key

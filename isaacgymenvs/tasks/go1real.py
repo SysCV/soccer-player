@@ -219,6 +219,7 @@ class Go1Real(VecTask):
             self.num_envs, device=self.device, dtype=torch.long)
         self.randomize_buf = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long)
+        self.lag_buffer = [torch.zeros(self.num_envs, 12, device=self.device, dtype=torch.float) for i in range(self.cfg["env"]["action_lag_step"]+1)]
         
         self.gait_indices = torch.zeros(self.num_envs, device=self.device,dtype=torch.float)
         self.clock_inputs = torch.zeros((self.num_envs, 4), device=self.device,dtype=torch.float)
@@ -358,7 +359,11 @@ class Go1Real(VecTask):
 
     def pre_physics_step(self, actions):
         self.actions = actions.clone().to(self.device)
-        self.agents["hardware_closed_loop"].publish_action(self.actions, hard_reset=False) # default pos will be added inside the agent
+
+        self.lag_buffer = self.lag_buffer[1:] + [self.actions.clone()]
+        self.targets = self.lag_buffer[0]
+
+        self.agents["hardware_closed_loop"].publish_action(self.targets, hard_reset=False) # default pos will be added inside the agent
 
         time.sleep(max(self.dt - (time.time() - self.time), 0))
         if self.control_steps % 100 == 0: 
@@ -444,7 +449,9 @@ class Go1Real(VecTask):
 
         gravity_vec = obs[:,0:3]
         commands = obs[:,3:6]
-        print("command:", commands)
+        
+        commands[:, :2] *= (torch.norm(commands[:, :2], dim=1) > 0.2).unsqueeze(1)
+        # print("command:", commands)
         dof_pos = obs[:,6:18]
         dof_vel = obs[:,18:30]
         actions = obs[:,30:42] # actions are not used in real robot
@@ -473,7 +480,7 @@ class Go1Real(VecTask):
             commands_scaled,
             dof_pos_scaled,
             dof_vel_scaled,
-            actions,
+            self.actions,
             self.clock_inputs
             # self.actions,
             # contact_states

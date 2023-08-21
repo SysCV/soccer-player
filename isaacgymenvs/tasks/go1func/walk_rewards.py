@@ -14,6 +14,8 @@ class RewardTerms:
     def _reward_tracking_lin_vel(self):
         # Tracking of linear velocity commands (xy axes)
         lin_vel_error = torch.sum(torch.square(self.env.commands[:, :2] - self.env.base_lin_vel[:, :2]), dim=1)
+        # print("command_v", self.env.commands[10:15, :2])
+        # print("base_v", self.env.base_lin_vel[10:15, :2])
         return torch.exp(-lin_vel_error / self.env.reward_params["tracking_lin_vel"]["sigma"])
 
     def _reward_tracking_ang_vel(self):

@@ -116,6 +116,7 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning.waq import waq_agent
     from isaacgymenvs.learning.waq import waq_models
     from isaacgymenvs.learning.waq import waq_network_builder
+    from isaacgymenvs.learning.waq import waq_player
 
 
     from isaacgymenvs.learning import common_player,common_agent
@@ -222,6 +223,7 @@ def launch_rlg_hydra(cfg: DictConfig):
         runner.player_factory.register_builder('common_ac', lambda **kwargs : common_player.CommonPlayer(**kwargs))
 
         runner.player_factory.register_builder('real_ac', lambda **kwargs : player.RealPlayer(**kwargs))
+        runner.player_factory.register_builder('waq_ac', lambda **kwargs : waq_player.Player(**kwargs))
 
         
         model_builder.register_model('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))

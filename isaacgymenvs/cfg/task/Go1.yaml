@@ -16,7 +16,7 @@ env:
   history_length: 15
 
 
-  action_lag_step: 6
+  action_lag_step: 1
 
   observe_contact_states: false
 
@@ -73,7 +73,7 @@ env:
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
-    linear_x: [ -5.0, 5.0] # min max [m/s]
+    linear_x: [ -2.0, 2.0] # min max [m/s]
     linear_x_init: [ -1.0, 1.0] # min max [m/s]
     num_bins_x: 21 # 20
 
@@ -81,7 +81,7 @@ env:
     linear_y_init: [ -0.6, 0.6]   # min max [m/s]
     num_bins_y: 1 # 20
 
-    yaw: [ -5.0, 5.0]          # min max [rad/s]
+    yaw: [ -2.0, 2.0]          # min max [rad/s]
     yaw_init: [ -1.0, 1.0]          # min max [rad/s]
     num_bins_yaw: 21 # 5
 
@@ -159,7 +159,7 @@ env:
       action_smoothness_1: -0.1
       action_smoothness_2: -0.1
 
-      base_height: -0.001
+      # base_height: -0.001
 
       # walk this way, this replace the feet air time
       tracking_contacts_shaped_force: 4.0
@@ -171,7 +171,7 @@ env:
       tracking_ang_vel:
         sigma: 0.25
       base_height:
-        target: 0.32
+        target: 0.30
       feet_air_time:
         baseline: 0.5
       tracking_contacts_shaped_force:

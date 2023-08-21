@@ -5,31 +5,30 @@ physics_engine: ${..physics_engine}
 
 env:
 
-  numEnvs: ${resolve_default:20,${...num_envs}}
+  numEnvs: ${resolve_default:4000,${...num_envs}}
   envSpacing: 2.  # [m]
 
-  cameraSensorPlt: true
+  cameraSensorPlt: false
 
   state_obs: false
   state_observations:
     # base_lin_vel: 3
-    base_ang_vel: 3
+    # base_ang_vel: 3
     projected_gravity: 3
-
     dof_pos: 12
     dof_vel: 12
     last_actions: 12
 
     ball_states_p: 3
-    # ball_states_v: 3
+    ball_states_v: 3
     goal_pose: 3
-    base_pose: 3 
-    base_quat: 4
+    #base_pose: 3
+    #base_quat: 4
 
   pixel_observations:
-    enable: true
-    height: 624
-    width: 624
+    enable: false
+    height: 224
+    width: 224
     cam_range: 140
     history: 1
 
@@ -45,7 +44,7 @@ env:
   actions_num: 12
 
   terminateCondition:
-    robot_x_range: [-1.0, 2.0] # [m]
+    robot_x_range: [-1.0, 1.5] # [m]
     ball_x_range: [-1.5, 3.5] # [m]
     ball_y_range: [-3, 3] # [m]
 
@@ -61,41 +60,41 @@ env:
     restitution: 0.9       # [-]
 
   baseInitState:
-    pos: [0.0, 0.0, 0.50] # x,y,z [m]
+    pos: [0.0, 0.0, 0.33] # x,y,z [m]
     rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
-    vLinear: [0.2, 0.0, 0.0]  # x,y,z [m/s]
+    vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
     vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
 
   goalInitState:
     pos: [ 3.0, 0.0, 0.15 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 0., 0.0]
+    randomPosRange: [ 0.0, 1.5, 0.0]
 
   wallInitState:
     pos: [ 3.01, 0.0, 0.5 ] # x,y,z [m]
     randomPosRange: [ 0.0, 0.0, 0.0]
 
   ballInitState:
-    pos: [ 0.3, 0.0, 0.92 ] # x,y,z [m]
-    randomPosRange: [ 0.2, 0.5, 0. ]
+    pos: [ 0.35, 0.0, 0.13 ] # x,y,z [m]
+    randomPosRange: [ 0.0, 0.5, 0.0]
     # ballInitSpeed: -1.0 # [m/s]
-    mass: 0.05 # [kg]
+    mass: 0.35 # [kg]
 
-  randomBallStateRanges:
-    pos_x: [-0.5, 0.5] # min max [m]
-    pos_y: [-0.5, 0.5] # min max [m]
-    v_x: [-2.5, 2.5] # min max [m/s]
-    v_y: [-2.5, 2.5] # min max [m/s]
+  # randomBallStateRanges:
+  #   pos_x: [-0.5, 0.5] # min max [m]
+  #   pos_y: [-0.5, 0.5] # min max [m]
+  #   v_x: [-2.5, 2.5] # min max [m/s]
+  #   v_y: [-2.5, 2.5] # min max [m/s]
 
-  randomCommandVelocityRanges:
-    linear_x: [-2., 2.] # min max [m/s]
-    linear_y: [-2., 2.]   # min max [m/s]
-    yaw: [-1., 1.]          # min max [rad/s]
+  # randomCommandVelocityRanges:
+  #   linear_x: [-2., 2.] # min max [m/s]
+  #   linear_y: [-2., 2.]   # min max [m/s]
+  #   yaw: [-1., 1.]          # min max [rad/s]
 
   control:
     # PD Drive parameters:
     stiffness: 20.0  # [N*m/rad]
     damping: 0.5   # [N*m*s/rad]
-    actionScale: 0.7
+    actionScale: 0.5
     controlFrequencyInv: 1 # 60 Hz
     # todo: change to a1 param?
 
@@ -118,7 +117,7 @@ env:
   rewards:
     rewardScales:
       ball_speed: 1.0
-      torque: 0.00025
+      torque: -0.00025
       dog_heading_ball: 0.5 # once been 1/200
       ball_dog_dis: 2.0
       ball_goal_dis: 4.0
@@ -126,7 +125,7 @@ env:
       catch_and_switch: 50.0
       dog_wall_dis: 0.5
       collision: -10.0
-      ball_height: 2.0
+      # ball_height: 2.0
 
 
     rewardParams:
@@ -155,14 +154,6 @@ env:
     defaultDofDriveMode: 4 # see GymDofDriveModeFlags (0 is none, 1 is pos tgt, 2 is vel tgt, 4 effort)
 
   learn:
-    # # rewards
-    # baseBallDistanceRewardScale: 1.0
-    # BallVelocityProjectRewardScale: 1.0
-    # baseHeadingRewardScale: 1.0
-    # linearVelocityXYRewardScale: 1.0
-    # angularVelocityZRewardScale: 0.5
-    # torqueRewardScale: -0.00025 
-
     # normalization
     linearVelocityScale: 1.0
     angularVelocityScale: 0.25
@@ -170,7 +161,7 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 10
+    episodeLength_s: 20
     
     # termination
     maxInGroundLength_s: 20

@@ -181,7 +181,7 @@ class PixelA2CBuilder(network_builder.NetworkBuilder):
                     obs = obs.permute((0, 3, 1, 2))
 
             # handle image tensors
-            resnet_out = self.image_feature(image_tensors.view(-1,624,624,3).permute((0, 3, 1, 2))) # (B, 512, 1, 1) .float()?
+            resnet_out = self.image_feature(image_tensors.view(-1,224,224,3).permute((0, 3, 1, 2))) # (B, 512, 1, 1) .float()?
 
             resnet_out = resnet_out.squeeze().view(-1,1,512) # (B, 4, 512)
             image_obs = self.feature_encoder(resnet_out) # (B, 64)

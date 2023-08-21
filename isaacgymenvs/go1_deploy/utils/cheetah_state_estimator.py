@@ -179,7 +179,7 @@ class StateEstimator:
         if MODE_LEFT == "body_height":
             cmd_height = 0.3 * self.left_stick[0]
         elif MODE_LEFT == "lat_vel":
-            cmd_y = 0.6 * self.left_stick[0]
+            cmd_y = - 1.0 * self.left_stick[0] # here y is inversed from controller
         elif MODE_LEFT == "stance_width":
             cmd_stance_width = 0.275 + 0.175 * self.left_stick[0]
         if MODE_RIGHT == "step_frequency":

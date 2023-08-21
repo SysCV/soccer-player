@@ -276,7 +276,8 @@ class Go1(VecTask):
         self.curriculum.set_to(low,high)
 
         # self.env_command_bins = np.zeros(self.num_envs, dtype=np.int)
-        _, self.env_command_bins = self.curriculum.sample_bins(self.num_envs)
+        new_commands, self.env_command_bins = self.curriculum.sample(self.num_envs)
+        self.commands = new_commands.to(self.device)
 
 
 
@@ -696,10 +697,6 @@ class Go1(VecTask):
         dof_pos_scale = self.dof_pos_scale
         dof_vel_scale = self.dof_vel_scale
 
-        base_quat = self.root_states[:, 3:7]
-        base_pose = self.root_states[:, 0:3]
-        base_lin_vel = quat_rotate_inverse(base_quat, self.root_states[:, 7:10]) * lin_vel_scale
-        base_ang_vel = quat_rotate_inverse(base_quat, self.root_states[:, 10:13]) * ang_vel_scale
 
 
         self.contact_state = (self.contact_forces[:, self.feet_indices, 2] > 1.).view(self.num_envs,
@@ -731,8 +728,12 @@ class Go1(VecTask):
             self.history_buffer[:] = torch.cat((obs, self.history_buffer[:, self.num_obs:]), dim=1)
 
         if self.obs_privilige:
-            self.privilige_buffer = torch.cat([base_lin_vel, base_ang_vel,
-                self.dof_stiff_rand_params, self.payload_rand_params, self.friction_rand_params, self.restitution_rand_params], dim= 1)
+            self.privilige_buffer = torch.cat([
+                self.base_lin_vel * lin_vel_scale, 
+                self.base_ang_vel * ang_vel_scale,
+                self.dof_stiff_rand_params, self.payload_rand_params, 
+                self.friction_rand_params, 
+                self.restitution_rand_params], dim= 1)
 
 
     def refresh_buffers(self):
@@ -745,8 +746,8 @@ class Go1(VecTask):
 
         self.base_pos = self.root_states[:, :3]
         self.base_quat = self.root_states[:, 3:7]
-        self.base_lin_vel = self.root_states[:, 7:10]
-        self.base_ang_vel = self.root_states[:, 10:13]
+        self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
+        self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
 
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
 

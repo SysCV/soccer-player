@@ -125,8 +125,8 @@ class A2CAgent(a2c_common.ContinuousA2CBase):
             mu = res_dict['mus']
             sigma = res_dict['sigmas']
             # priv_encode = self.model.get_rma_latent(batch_dict)
-            priv_encode = res_dict["rma_latent"]
-            e_state = res_dict["latent"]
+            e_state = res_dict["rma_latent"]
+            priv_encode = res_dict["latent"]
 
             e_loss_privilige = torch.nn.functional.mse_loss(priv_encode,e_state.detach())
             e_loss_history = torch.nn.functional.mse_loss(priv_encode.detach(),e_state)

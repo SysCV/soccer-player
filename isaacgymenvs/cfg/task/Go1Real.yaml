@@ -9,10 +9,10 @@ env:
   envSpacing: 2.  # [m]
 
   obs_history: true
-  history_length: 30
+  history_length: 15
 
 
-  action_lag_step: 0
+  action_lag_step: 5
 
   observe_contact_states: false
 

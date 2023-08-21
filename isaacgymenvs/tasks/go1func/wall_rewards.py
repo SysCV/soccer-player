@@ -20,24 +20,6 @@ class RewardTerms:
         # Tracking of angular velocity commands (yaw)
         ang_vel_error = torch.square(self.env.commands[:, 2] - self.env.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error / self.env.cfg.rewards.tracking_sigma_yaw)
-    
-    
-    def every(self):
-        rew_distance = self._reward_ball_goal_dis()
-        reward_ball_in_goal = self._reward_success()
-        rew_ball_dog_distance = self._reward_ball_dog_dis()
-        heading_reward = self._reward_dog_heading_ball()
-        ball_z_reward = self._reward_ball_height()
-        rew_torque = self._reward_torque()
-        rew_have_speed = self._reward_ball_speed()
-
-        # speed_error = torch.sum(torch.square(self.env.ball_lin_vel_xy_world - self.env.commands), dim=1)
-        # rew_ball_speed = torch.exp(-speed_error)
-
-        total_reward = heading_reward + rew_distance + rew_have_speed + \
-            rew_torque \
-        # + ball_z_reward 
-        + rew_ball_dog_distance + reward_ball_in_goal
 
     def _reward_ball_speed(self):
         ball_speed_square = torch.sum(torch.square(self.env.ball_lin_vel_xy_world), dim=1)
@@ -46,7 +28,7 @@ class RewardTerms:
 
     def _reward_torque(self):
         rew_torque = torch.sum(torch.square(self.env.torques), dim=1)
-        return - rew_torque
+        return rew_torque
 
     def _reward_ball_height(self):
         ball_z = self.env.ball_pos[:, 2]
@@ -56,8 +38,8 @@ class RewardTerms:
         robot_heading = torch.tensor([[1., 0., 0.]] * self.env.base_pos.size(0), device=self.env.root_states.device)
         base_quat_world = quat_rotate(self.env.base_quat, robot_heading)
         base_to_ball_world = self.env.ball_pos - self.env.base_pos
-        base_quat_world_xy = base_quat_world[:, :3]
-        base_to_ball_world_xy = base_to_ball_world[:, :3]
+        base_quat_world_xy = base_quat_world[:, :2]
+        base_to_ball_world_xy = base_to_ball_world[:, :2]
         base_quat_world_xy = base_quat_world_xy / torch.norm(base_quat_world_xy, dim=1, keepdim=True)
         base_to_ball_world_xy = base_to_ball_world_xy / torch.norm(base_to_ball_world_xy, dim=1, keepdim=True)
         dot_product = torch.sum(base_quat_world_xy * base_to_ball_world_xy, dim=1)
@@ -100,7 +82,8 @@ class RewardTerms:
 
 
         bonus_index = (ball_goal_distance_error < self.env.reward_params["hit_wall_and_switch"]["valid_success_range"]**2) & reward_index
-        reward_hit[bonus_index] += self.env.reward_params["hit_wall_and_switch"]["success_bonus_scale"] / 1 + self.env.reward_params["hit_wall_and_switch"]["hit_times_penalty"] * self.env.rebound_times[bonus_index]
+
+        reward_hit[bonus_index] += self.env.reward_params["hit_wall_and_switch"]["success_bonus_scale"] / (1 + self.env.reward_params["hit_wall_and_switch"]["hit_times_penalty"] * self.env.rebound_times[bonus_index])
 
         self.env.is_back[reward_index] = True
         self.env.rebound_times[reward_index] += 1
