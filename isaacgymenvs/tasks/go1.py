@@ -279,6 +279,9 @@ class Go1(VecTask):
         new_commands, self.env_command_bins = self.curriculum.sample(self.num_envs)
         self.commands = new_commands.to(self.device)
 
+        # setting the smaller commands to zero
+        self.commands[:, :2] *= (torch.norm(self.commands[:, :2], dim=1) > 0.2).unsqueeze(1)
+
 
 
     def get_wrapped_tensor(self):
@@ -326,7 +329,7 @@ class Go1(VecTask):
             self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs,1))
     
 
-        self.lag_buffer = [torch.zeros_like(self.dof_pos) for i in range(self.cfg["env"]["action_lag_step"]+1)]
+        self.lag_buffer = [torch.zeros_like(self.dof_pos, device=self.device) for i in range(self.cfg["env"]["action_lag_step"]+1)]
 
         for i in range(self.cfg["env"]["numActions"]):
             name = self.dof_names[i]
@@ -364,6 +367,7 @@ class Go1(VecTask):
 
         self.step_counter = 0
         self.actor_indices_for_reset: List[torch.Tensor] = []
+        self.is_first_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
 
 
 
@@ -536,7 +540,7 @@ class Go1(VecTask):
         actions_scaled = actions[:, :12] * self.action_scale
         actions_scaled[:, [0, 3, 6, 9]] *= self.hip_addtional_scale
 
-        self.lag_buffer = self.lag_buffer[1:] + [actions_scaled.clone()]
+        self.lag_buffer = self.lag_buffer[1:] + [actions_scaled.clone().to(self.device)]
         self.targets = self.lag_buffer[0] + self.default_dof_pos
 
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.targets))
@@ -585,11 +589,15 @@ class Go1(VecTask):
         
         self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)}
 
+        self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
+        self.extras["is_firsts"] = self.is_first_buf.to(self.rl_device)
+
         if self.obs_history:
             self.obs_dict["obs"]["state_history"] = torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
         if self.obs_privilige:
             self.obs_dict["obs"]["state_privilige"] = self.privilige_buffer.to(self.rl_device)
+            
 
         # asymmetric actor-critic
         if self.num_states > 0:
@@ -611,11 +619,12 @@ class Go1(VecTask):
             if len(push_ids) > 0:
                 self._push_robots(push_ids)
 
-        if len(resample_ids) > 0:
-            self.resample_commands(resample_ids)
 
+
+        self.is_first_buf[:] = False
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
+            self.is_first_buf[env_ids] = True
 
         self.set_actor_root_state_tensor_indexed()
 
@@ -625,8 +634,16 @@ class Go1(VecTask):
         if wandb.run is not None and self.wandb_extra_log:
             self.wandb_addtional_log()
         self.compute_reset()
-        self.compute_observations()
+
         self.compute_reward(self.actions)
+
+        # because reward should be computed before command change, otherwise the agent will not observe the command change
+        if len(resample_ids) > 0:
+            self.resample_commands(resample_ids)
+
+        self.compute_observations()
+
+
         if self.step_counter % self.random_frec == 0:
            self.randomize_props()
         self.step_counter += 1
@@ -699,12 +716,6 @@ class Go1(VecTask):
 
 
 
-        self.contact_state = (self.contact_forces[:, self.feet_indices, 2] > 1.).view(self.num_envs,
-                -1) * 1.0
-        
-
-        self.feet_air_time += self.dt
-
         dof_pos_scaled = (self.dof_pos - self.default_dof_pos) * dof_pos_scale
 
         commands_scaled = self.commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=self.commands.device)
@@ -750,6 +761,12 @@ class Go1(VecTask):
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
 
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+
+        self.contact_state = (self.contact_forces[:, self.feet_indices, 2] > 1.).view(self.num_envs,
+        -1) * 1.0
+        
+
+        self.feet_air_time += self.dt
 
     def compute_reset(self):
         # reset agents

@@ -6,7 +6,7 @@ import isaacgymenvs.utils.torch_jit_utils as torch_jit_utils
 
 # dual_balls = Qstar_element.repeat(400,1,1)
 
-def calc_projected_bbox(dual_balls, Quatw_root, pw_cam, K, pw_q):
+def calc_projected_bbox(dual_element, Quatw_root, pw_cam, K, pw_q):
     """
     dual_balls: (B, 4, 4)
     Quatw_c: (B, 4)
@@ -15,15 +15,15 @@ def calc_projected_bbox(dual_balls, Quatw_root, pw_cam, K, pw_q):
     pw_b: (B, 3)
     """
 
-    Tw_b = torch.cat([torch.eye(3, device=dual_balls.device).repeat(pw_q.shape[0], 1, 1), pw_q.unsqueeze(-1)], dim=-1)
+    Tw_b = torch.cat([torch.eye(3, device=pw_q.device).repeat(pw_q.shape[0], 1, 1), pw_q.unsqueeze(-1)], dim=-1)
     Tw_b = torch.cat([Tw_b, torch.tensor([0., 0., 0., 1.], device=Tw_b.device, dtype=Tw_b.dtype).unsqueeze(0).repeat(Tw_b.shape[0], 1, 1)], dim=-2)
     
-    dual_balls_w = torch.matmul(Tw_b, torch.matmul(dual_balls, Tw_b.transpose(-1, -2)))
+    Q_w = torch.matmul(Tw_b, torch.matmul(dual_element, Tw_b.transpose(-1, -2)))
 
     Rr_c = torch.tensor([[0, 0, 1],
                           [-1, 0, 0],
                           [0, -1, 0]],
-                          dtype=torch.float32, device=dual_balls.device)
+                          dtype=torch.float32, device=pw_q.device)
     # Rw_r = torch_jit_utils.quaternion_to_matrix(Quatw_r)
     Rw_r = quaternions_to_rotation_matrices(Quatw_root)
     Rw_c = torch.matmul(Rw_r, Rr_c)
@@ -41,28 +41,31 @@ def calc_projected_bbox(dual_balls, Quatw_root, pw_cam, K, pw_q):
     
     p34 = Tc_w[:, :3, :4]
 
-    Gstar = torch.matmul(K, torch.matmul(p34, torch.matmul(dual_balls_w, torch.matmul(p34.transpose(-1, -2), K.transpose(-1, -2)))))
+    Gstar = torch.matmul(K, torch.matmul(p34, torch.matmul(Q_w, torch.matmul(p34.transpose(-1, -2), K.transpose(-1, -2)))))
 
     sq_term_x = Gstar[..., 0, 2].square() - Gstar[..., 0, 0] * Gstar[..., 2, 2]
     sq_term_y = Gstar[..., 1, 2].square() - Gstar[..., 1, 1] * Gstar[..., 2, 2]
+
+    valid_index = (sq_term_x >= 0) & (sq_term_y >= 0) & cam_outside_q(pw_q, pw_cam) & cam_behind_q(Tw_c, pw_q)
 
     # print("dual_balls in world...", dual_balls_w[0])
     # print("p34..", p34[0])
     # print("Gstar...", Gstar[0])
     # print("sq_term...", sq_term_x[0])
     
-    assert (sq_term_x >= 0).all()
-    assert (sq_term_y >= 0).all()
+    # xmin, ymin, xmax, ymax
+    bbox_results = torch.zeros((pw_q.shape[0], 4), device=pw_q.device, dtype=pw_q.dtype)
 
-    xmin = (Gstar[..., 0, 2] + sq_term_x.sqrt()) / Gstar[..., 2, 2]
-    ymin = (Gstar[..., 1, 2] + sq_term_y.sqrt()) / Gstar[..., 2, 2]
-    xmax = (Gstar[..., 0, 2] - sq_term_x.sqrt()) / Gstar[..., 2, 2]
-    ymax = (Gstar[..., 1, 2] - sq_term_y.sqrt()) / Gstar[..., 2, 2]
+    bbox_results[valid_index, 0] = (Gstar[valid_index, 0, 2] + sq_term_x[valid_index].sqrt()) / Gstar[valid_index, 2, 2]
+    bbox_results[valid_index, 1] = (Gstar[valid_index, 1, 2] + sq_term_y[valid_index].sqrt()) / Gstar[valid_index, 2, 2]
+    bbox_results[valid_index, 2] = (Gstar[valid_index, 0, 2] - sq_term_x[valid_index].sqrt()) / Gstar[valid_index, 2, 2]
+    bbox_results[valid_index, 3] = (Gstar[valid_index, 1, 2] - sq_term_y[valid_index].sqrt()) / Gstar[valid_index, 2, 2]
 
-    y = torch.stack([xmin, ymin, xmax, ymax], dim=1) 
+    # print("bbox_results...", bbox_results)
+
 
     # print(y[0])
-    return y
+    return bbox_results
 
 # quat: x y z w
 def quaternions_to_rotation_matrices(quaternions):
@@ -94,20 +97,40 @@ def add_bbox_on_numpy_img(img, xmin, ymin, xmax, ymax, box_color=(255, 255, 255)
     img[ymax-line_thickness:ymax, xmin:xmax] = box_color
     return img
 
-def convert_bbox_to_img_coord(xmin, ymin, xmax, ymax, image_width, image_height, size_tolerance=5):
+def convert_bbox_to_img_coord(xy_minmax, image_width, image_height, size_tolerance=0):
+    pixel_bbox = torch.zeros_like(xy_minmax, dtype=torch.int32)
     # in order xmin, ymin, xmax, ymax
-    xmin = min(max(0, int(xmin)), image_width-1)
-    ymin = min(max(0, int(ymin)), image_height-1)
-    xmax = max(0,min(image_width-1, int(xmax)))
-    ymax = max(0,min(image_height-1, int(ymax)))
+    pixel_bbox[:,[0,2]] = torch.clamp(xy_minmax[:,[0,2]].to(torch.int32), min=0, max=image_width-1)
+    pixel_bbox[:,[1,3]] = torch.clamp(xy_minmax[:,[1,3]].to(torch.int32), min=0, max=image_height-1)
 
-    valid = True if xmin + 2 < xmax and ymin + 2 < ymax else False
+    valid_box = ((pixel_bbox[:,0] + size_tolerance) < pixel_bbox[:,2]) & ((pixel_bbox[:,1] + size_tolerance) < pixel_bbox[:,3])
 
-    return xmin, ymin, xmax, ymax
+    pixel_bbox[~valid_box,:] = 0
 
-def cam_outside_q():
-    pass
+    return pixel_bbox
 
-def cam_behind_q():
-    pass
+def convert_bbox_to_01(xy_minmax, image_width, image_height, size_tolerance=0):
+    pixel_bbox = torch.zeros_like(xy_minmax, dtype=torch.float32)
+    # in order xmin, ymin, xmax, ymax
+    pixel_bbox[:,[0,2]] = torch.clamp(xy_minmax[:,[0,2]], min=0, max=image_width-1)
+    pixel_bbox[:,[1,3]] = torch.clamp(xy_minmax[:,[1,3]], min=0, max=image_height-1)
+
+    valid_box = ((pixel_bbox[:,0] + size_tolerance) < pixel_bbox[:,2]) & ((pixel_bbox[:,1] + size_tolerance) < pixel_bbox[:,3])
+
+    pixel_bbox[~valid_box,:] = 0.
+
+    pixel_bbox[:,[0,2]] = pixel_bbox[:,[0,2]] / (image_width - 1)
+    pixel_bbox[:,[1,3]] = pixel_bbox[:,[1,3]] / (image_height - 1)
+
+    return pixel_bbox
+
+def cam_outside_q(pw_q, pw_c, tolerance=0.1):
+    # because we are using the simulator, we can assume that the camera is always outside the quadric
+    return torch.norm(pw_c - pw_q, dim=-1) > tolerance
+
+def cam_behind_q(Tw_c, pw_q):
+    envs = pw_q.shape[0]
+    pw_q_4 = torch.cat([pw_q.unsqueeze(-1), torch.ones((envs, 1, 1), device=pw_q.device, dtype=pw_q.dtype)], dim=-2)
+    pc_q = torch.matmul(Tw_c.inverse(), pw_q_4).squeeze(-1)
+    return pc_q[:, 2] > 0
 

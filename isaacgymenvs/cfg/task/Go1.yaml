@@ -75,7 +75,7 @@ env:
   randomCommandVelocityRanges:
     linear_x: [ -2.0, 2.0] # min max [m/s]
     linear_x_init: [ -1.0, 1.0] # min max [m/s]
-    num_bins_x: 21 # 20
+    num_bins_x: 1 # 20
 
     linear_y: [ -0.6, 0.6]   # min max [m/s]
     linear_y_init: [ -0.6, 0.6]   # min max [m/s]
@@ -83,7 +83,7 @@ env:
 
     yaw: [ -2.0, 2.0]          # min max [rad/s]
     yaw_init: [ -1.0, 1.0]          # min max [rad/s]
-    num_bins_yaw: 21 # 5
+    num_bins_yaw: 1 # 5
 
   control:
     type: "pose_pd" # pose_pd / actuator_net

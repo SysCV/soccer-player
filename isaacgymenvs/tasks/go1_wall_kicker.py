@@ -123,6 +123,9 @@ class Go1WallKicker(VecTask):
             plt.axis('off')
         self.add_real_ball = self.cfg["task"]["target_ball"]
 
+        self.obs_history = self.cfg["env"]["obs_history"]
+        self.history_length = self.cfg["env"]["history_length"]
+
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
         self.ang_vel_scale = self.cfg["env"]["learn"]["angularVelocityScale"]
@@ -214,6 +217,11 @@ class Go1WallKicker(VecTask):
         elif self.state_obs:
             self.obs_space = spaces.Dict({"state_obs":spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
                                     })
+        elif self.obs_history:
+            obs_space_dict = {}
+            obs_space_dict["state_obs"] = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+            obs_space_dict["state_history"] = spaces.Box(np.ones(self.num_obs*self.history_length) * -np.Inf, np.ones(self.num_obs*self.history_length) * np.Inf)
+            self.obs_space = spaces.Dict(obs_space_dict)
 
         # other
         self.dt = self.sim_params.dt
@@ -310,6 +318,12 @@ class Go1WallKicker(VecTask):
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3)  # shape: num_envs, num_bodies, xyz axis
         self.torques = gymtorch.wrap_tensor(torques).view(self.num_envs, self.num_dof)
 
+        if self.obs_history:
+            zero_obs = torch.zeros(self.num_obs, dtype=torch.float32, device=self.device)
+            zero_obs[2] = -1 # default gravity
+            self.history_per_begin = torch.tile(zero_obs, (self.history_length,))
+            self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs,1))
+
 
     def create_self_buffers(self):
         # initialize some data used later on
@@ -347,8 +361,9 @@ class Go1WallKicker(VecTask):
         self.onground_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
         self.stable_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
 
-        Qstar_element = torch.diag(torch.tensor([1., 1., 1., -1 / 0.1 **2],device=self.device))
-        self.dual_balls = Qstar_element.repeat(self.num_envs,1,1)
+        self.ball_qstar_element = torch.diag(torch.tensor([1., 1., 1., -1 / 0.1 **2],device=self.device))
+        # 0.01, 0.3, 0.3, asset_options_box
+        self.goal_qstar_element = torch.diag(torch.tensor([0.01 ** 2, 0.15 ** 2, 0.15 ** 2, -1],device=self.device))
 
     def create_sim(self):
         self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
@@ -435,7 +450,7 @@ class Go1WallKicker(VecTask):
         self.goal_handles = []
         self.wall_handles = []
 
-        if self.pixel_obs:
+        if self.pixel_obs or self.have_cam_window:
             self.camera_handles = []
             self.camera_tensor_list = []
             self.frame_count = 0
@@ -474,7 +489,7 @@ class Go1WallKicker(VecTask):
             self.envs.append(env_ptr)
             self.a1_handles.append(a1_handle)
 
-            if self.pixel_obs:
+            if self.pixel_obs or self.have_cam_window:
                 color = gymapi.Vec3(1, 0, 0)
                 color_goal = gymapi.Vec3(0, 1, 0)
             else:
@@ -528,7 +543,7 @@ class Go1WallKicker(VecTask):
                 self.gym.set_rigid_body_color(env_ptr, a1_handle, j, gymapi.MESH_VISUAL_AND_COLLISION, color)
 
 
-            if self.pixel_obs:
+            if self.pixel_obs or self.have_cam_window:
                 camera_properties = gymapi.CameraProperties()
                 camera_properties.horizontal_fov = self.cam_range
                 camera_properties.enable_tensors = True
@@ -628,6 +643,13 @@ class Go1WallKicker(VecTask):
             "state_obs":
             torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
             }
+        elif self.obs_history:
+            self.obs_dict["obs"] = {
+            "state_obs":
+            torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device),
+            "state_history":
+            torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)
+            }
         else:
             self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
@@ -673,7 +695,7 @@ class Go1WallKicker(VecTask):
         self.compute_reset()
         self.compute_reward(self.actions)
 
-        if self.pixel_obs:
+        if self.pixel_obs or self.have_cam_window:
             self.compute_pixels()
 
     def compute_pixels(self):
@@ -702,10 +724,11 @@ class Go1WallKicker(VecTask):
         # base_quat = root_states[::4, 3:7]
         # base_pose = root_states[::4, 0:3]
 
-        base_quat = self.base_body_state[:, 3:7]
-        base_pose = self.base_body_state[:, 0:3]
+        # base_quat = self.base_body_state[:, 3:7]
+        # base_pose = self.base_body_state[:, 0:3]
 
-        ball_pose = root_states[1::4, 0:3]
+        # ball_pose = root_states[1::4, 0:3]
+        # goal_pose = root_states[2::4, 0:3]
 
 
         if self.have_cam_window:
@@ -717,22 +740,44 @@ class Go1WallKicker(VecTask):
                 # cam_img = whole_picture.cpu().numpy()
 
 
-                bboxes = quadric_utils.calc_projected_bbox(self.dual_balls, base_quat, base_pose, self.K_torch, ball_pose)
+                # bboxes_ball = quadric_utils.calc_projected_bbox(self.ball_qstar_element, base_quat, base_pose, self.K_torch, ball_pose)
 
-                bbox_to_show = bboxes[0]
-
-                xmin, ymin, xmax, ymax = quadric_utils.convert_bbox_to_img_coord(
-                    bbox_to_show[0].item(),
-                    bbox_to_show[1].item(),
-                    bbox_to_show[2].item(),
-                    bbox_to_show[3].item(),
+                pixel_bbox_ball = quadric_utils.convert_bbox_to_img_coord(
+                    self.bboxes_ball,
                     self.image_width,
                     self.image_height)
+                
+                # print("=== ball bbox:",bboxes_ball)
+                # print("=== pixel ball bbox:",pixel_bbox_ball)
+                
+
+                # bboxes_goal = quadric_utils.calc_projected_bbox(self.goal_qstar_element, base_quat, base_pose, self.K_torch, goal_pose)
+                pixel_bbox_goal = quadric_utils.convert_bbox_to_img_coord(
+                    self.bboxes_goal,
+                    self.image_width,
+                    self.image_height)
+                # print("=== goal bbox:",bboxes_goal)
+                # print("=== pixel goal bbox:",pixel_bbox_goal)
+
+
+
                 cam_img = self.camera_tensor_imgs_buf[0,:,:,:].cpu().numpy()
-                cam_img = quadric_utils.add_bbox_on_numpy_img(cam_img, xmin, ymin, xmax, ymax)
+                cam_img = quadric_utils.add_bbox_on_numpy_img(
+                    cam_img, 
+                    pixel_bbox_ball[0,0].item(),
+                    pixel_bbox_ball[0,1].item(),
+                    pixel_bbox_ball[0,2].item(),
+                    pixel_bbox_ball[0,3].item())
+                cam_img = quadric_utils.add_bbox_on_numpy_img(
+                    cam_img,
+                    pixel_bbox_goal[0,0].item(),
+                    pixel_bbox_goal[0,1].item(),
+                    pixel_bbox_goal[0,2].item(),
+                    pixel_bbox_goal[0,3].item(),box_color=(0,255,0))
+                
                 self.ax.imshow(cam_img)
                 plt.draw()
-                plt.pause(0.001)
+                plt.pause(0.01)
                 self.ax.cla()
 
     def refresh_self_buffers(self):
@@ -834,13 +879,30 @@ class Go1WallKicker(VecTask):
         #     requires_grad=False,
         #     device=commands.device
         # )
-        goal_p = root_states[2::4, 0:3] - root_states[0::4, 0:3]
-        ball_states_p = root_states[1::4, 0:3] - root_states[0::4, 0:3]
-        ball_states_v = root_states[1::4, 7:10]
 
-        goal_p = quat_rotate_inverse(base_quat, goal_p)
-        ball_states_p = quat_rotate_inverse(base_quat, ball_states_p)
-        ball_states_v = quat_rotate_inverse(base_quat, ball_states_v)
+        goal_p = quat_rotate_inverse(base_quat, root_states[2::4, 0:3] - root_states[0::4, 0:3])
+        ball_states_p = quat_rotate_inverse(base_quat, root_states[1::4, 0:3] - root_states[0::4, 0:3])
+        ball_states_v = quat_rotate_inverse(base_quat, root_states[1::4, 7:10])
+
+        pw_ball = root_states[1::4, 0:3]
+        pw_goal = root_states[2::4, 0:3]
+
+        self.bboxes_ball = quadric_utils.calc_projected_bbox(self.ball_qstar_element, base_quat, base_pose, self.K_torch, pw_ball)
+
+        pixel_bbox_ball = quadric_utils.convert_bbox_to_01(
+            self.bboxes_ball,
+            self.image_width,
+            self.image_height)
+        
+
+        self.bboxes_goal = quadric_utils.calc_projected_bbox(self.goal_qstar_element, base_quat, base_pose, self.K_torch, pw_goal)
+        pixel_bbox_goal = quadric_utils.convert_bbox_to_01(
+            self.bboxes_ball,
+            self.image_width,
+            self.image_height)
+        
+        # print("=== ball bbox:",pixel_bbox_ball)
+        # print("=== goal bbox:",pixel_bbox_ball)
 
         cat_list = []
         # check dict have key
@@ -866,6 +928,12 @@ class Go1WallKicker(VecTask):
             cat_list.append(ball_states_p)
         if "ball_states_v" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_v)
+
+        if "pixel_bbox_ball" in self.cfg["env"]["state_observations"]:
+            cat_list.append(pixel_bbox_ball)
+
+        if "pixel_bbox_goal" in self.cfg["env"]["state_observations"]:
+            cat_list.append(pixel_bbox_goal)
 
         if "goal_pose" in self.cfg["env"]["state_observations"]:
             cat_list.append(goal_p)
@@ -895,8 +963,11 @@ class Go1WallKicker(VecTask):
 
         self.obs_buf[:] = obs
 
+        if self.obs_history:
+            self.history_buffer[:] = torch.cat((obs, self.history_buffer[:, self.num_obs:]), dim=1)
+
     def _prepare_reward_function(self):
-        """ Prepares a list of reward functions, whcih will be called to compute the total reward.
+        """ Prepares a list of reward functions, which will be called to compute the total reward.
             Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.
         """
         # reward containers
@@ -983,6 +1054,9 @@ class Go1WallKicker(VecTask):
             "state_obs":
             torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
             }
+        elif self.obs_history:
+            self.obs_dict["obs"] = {"state_obs":torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)}
+            self.obs_dict["obs"]["state_history"] = torch.clamp(self.history_buffer, -self.clip_obs, self.clip_obs).to(self.rl_device)
         else:
             self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
@@ -1054,6 +1128,9 @@ class Go1WallKicker(VecTask):
 
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
+
+        if self.obs_history:
+            self.history_buffer[env_ids,:] = torch.tile(self.history_per_begin, (len(env_ids), 1))
 
     def deferred_set_actor_root_state_tensor_indexed(self, obj_indices: List[torch.Tensor]) -> None:
         self.actor_indices_for_reset.append(obj_indices)

@@ -14,7 +14,7 @@ def rescale_actions(low, high, action):
     scaled_action =  action * d + m
     return scaled_action
 
-class RealPlayer(BasePlayer):
+class Player(BasePlayer):
     def __init__(self, params):
         BasePlayer.__init__(self, params)
         self.network = self.config['network']

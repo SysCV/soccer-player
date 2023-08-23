@@ -10,6 +10,10 @@ env:
 
   cameraSensorPlt: false
 
+  obs_history: false
+  history_length: 15
+
+
   state_obs: false
   state_observations:
     # base_lin_vel: 3
@@ -20,8 +24,12 @@ env:
     last_actions: 12
 
     ball_states_p: 3
-    ball_states_v: 3
     goal_pose: 3
+
+    # pixel_bbox_ball: 4
+    # pixel_bbox_goal: 4
+
+    ball_states_v: 3
     #base_pose: 3
     #base_quat: 4
 

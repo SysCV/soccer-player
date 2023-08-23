@@ -2,13 +2,13 @@ params:
   seed: ${...seed}
 
   algo:
-    name: base_ac
+    name: a2c_continuous
 
   model:
     name: continuous_a2c_logstd
 
   network:
-    name: actor_critic_state
+    name: actor_critic_history
     separate: False
 
     space:
@@ -23,7 +23,17 @@ params:
         fixed_sigma: True
 
     mlp:
-      units: [512, 256, 128] # [256, 128, 64] # [512, 256, 128]
+      units: [256, 128, 64]
+      activation: elu
+      d2rl: False
+
+      initializer:
+        name: default
+      regularizer:
+        name: None
+
+    history:
+      units: [256, 32, 8]
       activation: elu
       d2rl: False
 
@@ -58,18 +68,15 @@ params:
     truncate_grads: True
     grad_norm: 1.
     horizon_length: 24
-    minibatch_size: 64000 # 8000 * 24 / 3 = 64000
+    minibatch_size: 24000 # 4000 * 24 / 4 = 24000
     mini_epochs: 5
     critic_coef: 2
     clip_value: True
     seq_len: 4 # only for rnn
     bounds_loss_coef: 0.001
 
-    max_epochs: ${resolve_default:2000,${....max_iterations}}
+    max_epochs: ${resolve_default:160000,${....max_iterations}}
     save_best_after: 200
     score_to_win: 20000
-    save_frequency: 500
+    save_frequency: 5000
     print_stats: True
-
-  player:
-    games_num: 50000
