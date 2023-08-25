@@ -1,5 +1,5 @@
-train_args=("Go1PPOwaq" "Go1PPO")
-# train_args=("Go1PPOrnn" "Go1PPOhistory" "Go1PPOsea" "Go1PPOrma"  "Go1PPOteacher")
+train_args=("Go1PPO")
+# train_args=("Go1PPO" "Go1PPOrnn" "Go1PPOhistory" "Go1PPOsea" "Go1PPOrma"  "Go1PPOteacher" "Go1PPOwaq")
 seeds=(42 2 17 13)
 
 for seed in "${seeds[@]}"; do

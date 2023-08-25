@@ -5,7 +5,7 @@ physics_engine: ${..physics_engine}
 
 env:
   numEnvs: ${resolve_default:8000,${...num_envs}}
-  envSpacing: 2.  # [m]
+  envSpacing: 2. # [m]
 
   wandb_extra_log: True
   wandb_extra_log_period: 8000
@@ -15,7 +15,6 @@ env:
   obs_history: true
   history_length: 15
 
-
   action_lag_step: 1
 
   observe_contact_states: false
@@ -23,7 +22,7 @@ env:
   obs_num:
     # base_v: 3
     # base_w: 3
-    gravity: 3 
+    gravity: 3
     command: 3
     dof_p: 12
     dof_v: 12
@@ -36,7 +35,7 @@ env:
     gravity: 0.05
     command: 0
     dof_p: 0.01
-    dof_v: 1.5
+    dof_v: 0.1
     pre_act: 0
     gait_sin_indict: 0
 
@@ -46,7 +45,7 @@ env:
     offsets: 0.0
     bounds: 0.0
     kappa: 0.07
-    
+
   obs_privilege: true
   privilege_obs_num:
     base_v: 3
@@ -62,34 +61,34 @@ env:
   clipActions: 1.0
 
   plane:
-    staticFriction: 0.5  # [-]
-    dynamicFriction: 0.5  # [-]
-    restitution: 0.        # [-]
+    staticFriction: 0.5 # [-]
+    dynamicFriction: 0.5 # [-]
+    restitution: 0. # [-]
 
   baseInitState:
     pos: [0.0, 0.0, 0.35] # x,y,z [m]
     rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
-    vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
-    vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
+    vLinear: [0.0, 0.0, 0.0] # x,y,z [m/s]
+    vAngular: [0.0, 0.0, 0.0] # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
-    linear_x: [ -2.0, 2.0] # min max [m/s]
-    linear_x_init: [ -1.0, 1.0] # min max [m/s]
-    num_bins_x: 1 # 20
+    linear_x: [-2.0, 2.0] # min max [m/s]
+    linear_x_init: [-1.0, 1.0] # min max [m/s]
+    num_bins_x: 21 # 20
 
-    linear_y: [ -0.6, 0.6]   # min max [m/s]
-    linear_y_init: [ -0.6, 0.6]   # min max [m/s]
+    linear_y: [-0.6, 0.6] # min max [m/s]
+    linear_y_init: [-0.6, 0.6] # min max [m/s]
     num_bins_y: 1 # 20
 
-    yaw: [ -2.0, 2.0]          # min max [rad/s]
-    yaw_init: [ -1.0, 1.0]          # min max [rad/s]
-    num_bins_yaw: 1 # 5
+    yaw: [-2.0, 2.0] # min max [rad/s]
+    yaw_init: [-1.0, 1.0] # min max [rad/s]
+    num_bins_yaw: 21 # 5
 
   control:
     type: "pose_pd" # pose_pd / actuator_net
     # PD Drive parameters:
-    stiffness: 20.0  # [N*m/rad]
-    damping: 0.5     # [N*m*s/rad]
+    stiffness: 20.0 # [N*m/rad]
+    damping: 0.5 # [N*m*s/rad]
     actionScale: 0.5
     hipAddtionalScale: 0.5
     controlFrequencyInv: 1 # control step every dt
@@ -116,23 +115,23 @@ env:
       interval_s: 7
       max_vel: 0.5
 
-  defaultJointAngles:  # = target angles when action = 0.0
-    FL_hip_joint: 0.1   # [rad]
-    RL_hip_joint: 0.1   # [rad]
-    FR_hip_joint: -0.1  # [rad]
-    RR_hip_joint: -0.1    # [rad]
+  defaultJointAngles: # = target angles when action = 0.0
+    FL_hip_joint: 0.1 # [rad]
+    RL_hip_joint: 0.1 # [rad]
+    FR_hip_joint: -0.1 # [rad]
+    RR_hip_joint: -0.1 # [rad]
 
-    FL_thigh_joint: 0.8     # [rad]
-    RL_thigh_joint: 1.    # [rad]
-    FR_thigh_joint: 0.8     # [rad]
-    RR_thigh_joint: 1.   # [rad]
+    FL_thigh_joint: 0.8 # [rad]
+    RL_thigh_joint: 1. # [rad]
+    FR_thigh_joint: 0.8 # [rad]
+    RR_thigh_joint: 1. # [rad]
 
-    FL_calf_joint: -1.5    # [rad]
-    RL_calf_joint: -1.5    # [rad]
-    FR_calf_joint: -1.5   # [rad]
-    RR_calf_joint: -1.5     # [rad]
+    FL_calf_joint: -1.5 # [rad]
+    RL_calf_joint: -1.5 # [rad]
+    FR_calf_joint: -1.5 # [rad]
+    RR_calf_joint: -1.5 # [rad]
 
-# for a1
+  # for a1
   urdfAsset:
     collapseFixedJoints: True
     fixBaseLink: False
@@ -141,7 +140,7 @@ env:
   rewards:
     only_positive_rewards_ji22_style: True
     sigma_rew_neg: 0.02 # is important!!
-    
+
     rewardScales:
       tracking_lin_vel: 1.0
       tracking_ang_vel: 0.5
@@ -149,7 +148,7 @@ env:
 
       orientation: -5.0
       lin_vel_z: -0.02
-      
+
       dof_acc: -2.5e-7
       dof_vel: -0.0001
       torque: -0.0001
@@ -181,14 +180,14 @@ env:
 
   learn:
     # normalization
-    linearVelocityScale: 2.0
+    linearVelocityScale: 0.5
     angularVelocityScale: 0.25
     dofPositionScale: 1.0
     dofVelocityScale: 0.05
 
     # episode length in seconds
     episodeLength_s: 20
-    
+
     curriculum:
       resample_s: 5
       success_threshold:
@@ -196,13 +195,13 @@ env:
         tracking_ang_vel: 0.8
         tracking_contacts_shaped_force: 0.9
         tracking_contacts_shaped_vel: 0.9
-      local_range: [0.6,0.6,0.6]
+      local_range: [0.6, 0.6, 0.6]
 
   # viewer cam:
   viewer:
     refEnv: 0
-    pos: [0, 0, 4]  # [m]
-    lookat: [1., 1, 3.3]  # [m]
+    pos: [0, 0, 4] # [m]
+    lookat: [1., 1, 3.3] # [m]
 
   # set to True if you use camera sensors in the environment
   enableCameraSensors: False
@@ -231,7 +230,7 @@ sim:
 task:
   randomize: False
   randomization_params:
-    frequency: 600   # Define how many environment steps between generating new randomizations
+    frequency: 600 # Define how many environment steps between generating new randomizations
     observations:
       range: [0, .002] # range for the white noise
       operation: "additive"
@@ -240,24 +239,24 @@ task:
       range: [0., .02]
       operation: "additive"
       distribution: "gaussian"
-    sim_params: 
+    sim_params:
       gravity:
         range: [0, 0.4]
         operation: "additive"
         distribution: "gaussian"
-        schedule: "linear"  # "linear" will linearly interpolate between no rand and max rand
+        schedule: "linear" # "linear" will linearly interpolate between no rand and max rand
         schedule_steps: 3000
     actor_params:
       a1:
-        color: 
+        color:
           # only can fully randomize color now
         rigid_body_properties:
-          mass: 
+          mass:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
             setup_only: True # Property will only be randomized once before simulation is started. See Domain Randomization Documentation for more info.
-            schedule: "linear"  # "linear" will linearly interpolate between no rand and max rand
+            schedule: "linear" # "linear" will linearly interpolate between no rand and max rand
             schedule_steps: 3000
         rigid_shape_properties:
           friction:
@@ -265,36 +264,36 @@ task:
             range: [0.7, 1.3]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
           restitution:
             range: [0., 0.7]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
         dof_properties:
-          damping: 
+          damping:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
-          stiffness: 
+          stiffness:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
           lower:
             range: [0, 0.01]
             operation: "additive"
             distribution: "gaussian"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
           upper:
             range: [0, 0.01]
             operation: "additive"
             distribution: "gaussian"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000

@@ -132,8 +132,11 @@ class Go1WallKicker(VecTask):
         self.dof_pos_scale = self.cfg["env"]["learn"]["dofPositionScale"]
         self.dof_vel_scale = self.cfg["env"]["learn"]["dofVelocityScale"]
         self.action_scale = self.cfg["env"]["control"]["actionScale"]
+        self.hip_addtional_scale = self.cfg["env"]["control"]["hipAddtionalScale"]
 
         # reward scales
+        self.postive_reward_ji22 = self.cfg["env"]["rewards"]["only_positive_rewards_ji22_style"]
+        self.sigma_rew_neg = self.cfg["env"]["rewards"]["sigma_rew_neg"]
         self.reward_scales = self.cfg["env"]["rewards"]["rewardScales"]
         self.reward_params = self.cfg["env"]["rewards"]["rewardParams"]
 
@@ -311,12 +314,19 @@ class Go1WallKicker(VecTask):
         self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[:self.num_envs * (self.num_bodies + 3), :]
         self.base_body_state = self.rigid_body_state.view(self.num_envs, (self.num_bodies + 3), 13
                                                           )[:, self.base_index, 0:8]
+        self.foot_velocities = self.rigid_body_state.view(self.num_envs, (self.num_bodies + 3), 13)[:,self.feet_indices,7:10]
+
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
+        self.last_dof_vel = self.dof_vel.clone()
+
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3)  # shape: num_envs, num_bodies, xyz axis
         self.torques = gymtorch.wrap_tensor(torques).view(self.num_envs, self.num_dof)
+
+        self.rew_pos = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+        self.rew_neg = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
 
         if self.obs_history:
             zero_obs = torch.zeros(self.num_obs, dtype=torch.float32, device=self.device)
@@ -328,6 +338,27 @@ class Go1WallKicker(VecTask):
     def create_self_buffers(self):
         # initialize some data used later on
         # the differce with monitor is that these are not wrapped gym-state tensors
+
+        # default gait
+        self.frequencies = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * self.cfg["env"]["gait_condition"]["frequency"]
+
+        self.phases =  self.cfg["env"]["gait_condition"]["phases"]
+        self.offsets =  self.cfg["env"]["gait_condition"]["offsets"]
+        self.bounds =  self.cfg["env"]["gait_condition"]["bounds"]
+        self.kappa = self.cfg["env"]["gait_condition"]["kappa"] # from walk these ways
+
+
+        self.durations = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * self.cfg["env"]["gait_condition"]["duration"]
+
+        self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
+                                                  requires_grad=False, )
+
+        self.gait_indices = torch.zeros(self.num_envs, 
+                                        dtype=torch.float, device=self.device,
+                                        requires_grad=False)
+        self.clock_inputs = torch.zeros(self.num_envs, 4, 
+                                        dtype=torch.float, device=self.device,
+                                        requires_grad=False)
 
         self.commands = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
 
@@ -355,7 +386,13 @@ class Go1WallKicker(VecTask):
         self.initial_root_states = self.root_states.clone()
         self.initial_root_states[:] = to_torch(self.base_init_state, device=self.device, requires_grad=False)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
+        
+        self.lag_buffer = [torch.zeros_like(self.dof_pos, device=self.device) for i in range(self.cfg["env"]["action_lag_step"]+1)]
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.targets = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.last_targets = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.last_last_targets = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
 
         self.actor_indices_for_reset: List[torch.Tensor] = []
         self.onground_length = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
@@ -364,6 +401,7 @@ class Go1WallKicker(VecTask):
         self.ball_qstar_element = torch.diag(torch.tensor([1., 1., 1., -1 / 0.1 **2],device=self.device))
         # 0.01, 0.3, 0.3, asset_options_box
         self.goal_qstar_element = torch.diag(torch.tensor([0.01 ** 2, 0.15 ** 2, 0.15 ** 2, -1],device=self.device))
+
 
     def create_sim(self):
         self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
@@ -415,9 +453,9 @@ class Go1WallKicker(VecTask):
         body_names = self.gym.get_asset_rigid_body_names(a1)
         self.dof_names = self.gym.get_asset_dof_names(a1)
         # extremity_name = "SHANK" if asset_options.collapse_fixed_joints else "FOOT"
-        # extremity_name = "foot"
-        # feet_names = [s for s in body_names if extremity_name in s]
-        # self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
+        extremity_name = "foot"
+        feet_names = [s for s in body_names if extremity_name in s]
+        self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         knee_names = [s for s in body_names if ("hip" in s) or ("thigh" in s)]
         self.knee_indices = torch.zeros(len(knee_names), dtype=torch.long, device=self.device, requires_grad=False)
         calf_names = [s for s in body_names if ("calf" in s)]
@@ -565,8 +603,8 @@ class Go1WallKicker(VecTask):
                 self.camera_tensor_list.append(torch_cam_tensor)
 
 
-        # for i in range(len(feet_names)):
-        #     self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.a1_handles[0], feet_names[i])
+        for i in range(len(feet_names)):
+            self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.a1_handles[0], feet_names[i])
         for i in range(len(knee_names)):
             self.knee_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.a1_handles[0], knee_names[i])
 
@@ -577,9 +615,19 @@ class Go1WallKicker(VecTask):
         self.goal_index = self.gym.find_actor_rigid_body_handle(self.envs[0], self.goal_handles[0], "goal")
 
     def pre_physics_step(self, actions):
+        self.last_last_targets = self.last_targets.clone()
+        self.last_targets = self.targets.clone()
+        self.last_dof_vel = self.dof_vel.clone() # because the vel will be updated in the physics step, so we have to save the last vel before the physics step
+        self.last_actions = self.actions.clone()
         self.actions = actions.clone().to(self.device)
-        targets = self.action_scale * self.actions + self.default_dof_pos
-        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
+
+        actions_scaled = actions[:, :12] * self.action_scale
+        actions_scaled[:, [0, 3, 6, 9]] *= self.hip_addtional_scale
+
+        self.lag_buffer = self.lag_buffer[1:] + [actions_scaled.clone().to(self.device)]
+        self.targets = self.lag_buffer[0] + self.default_dof_pos
+
+        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.targets))
 
 
     def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
@@ -599,10 +647,6 @@ class Go1WallKicker(VecTask):
         action_tensor = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         # apply actions
         self.pre_physics_step(action_tensor)
-
-
-
-
 
         # step physics and render each frame
         for i in range(self.control_freq_inv):
@@ -687,8 +731,7 @@ class Go1WallKicker(VecTask):
         self.set_actor_root_state_tensor_indexed()
 
         self.refresh_self_buffers()
-
-
+        self._step_contact_targets()
 
 
         self.compute_observations()
@@ -761,19 +804,19 @@ class Go1WallKicker(VecTask):
 
 
 
-                cam_img = self.camera_tensor_imgs_buf[0,:,:,:].cpu().numpy()
+                cam_img = self.camera_tensor_imgs_buf[self.num_envs - 1,:,:,:].cpu().numpy()
                 cam_img = quadric_utils.add_bbox_on_numpy_img(
                     cam_img, 
-                    pixel_bbox_ball[0,0].item(),
-                    pixel_bbox_ball[0,1].item(),
-                    pixel_bbox_ball[0,2].item(),
-                    pixel_bbox_ball[0,3].item())
+                    pixel_bbox_ball[self.num_envs - 1,0].item(),
+                    pixel_bbox_ball[self.num_envs - 1,1].item(),
+                    pixel_bbox_ball[self.num_envs - 1,2].item(),
+                    pixel_bbox_ball[self.num_envs - 1,3].item())
                 cam_img = quadric_utils.add_bbox_on_numpy_img(
                     cam_img,
-                    pixel_bbox_goal[0,0].item(),
-                    pixel_bbox_goal[0,1].item(),
-                    pixel_bbox_goal[0,2].item(),
-                    pixel_bbox_goal[0,3].item(),box_color=(0,255,0))
+                    pixel_bbox_goal[self.num_envs - 1,0].item(),
+                    pixel_bbox_goal[self.num_envs - 1,1].item(),
+                    pixel_bbox_goal[self.num_envs - 1,2].item(),
+                    pixel_bbox_goal[self.num_envs - 1,3].item(),box_color=(0,255,0))
                 
                 self.ax.imshow(cam_img)
                 plt.draw()
@@ -797,6 +840,14 @@ class Go1WallKicker(VecTask):
         self.ball_pos = self.root_states[1::4, 0:3]
         self.goal_pos = self.root_states[2::4, 0:3]
         self.ball_lin_vel_xy_world = self.root_states[1::4, 7:9]
+
+        self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+
+        self.contact_state = (self.contact_forces[:, self.feet_indices, 2] > 1.).view(self.num_envs,
+        -1) * 1.0
+        self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[::4, 7:10])
+
+        # self.feet_air_time += self.dt
 
         #judgement data
         is_onground = torch.norm(self.contact_forces[:, self.ball_index, :], dim=1) > 0.1
@@ -823,12 +874,31 @@ class Go1WallKicker(VecTask):
         extra_info = {}
         episode_cumulative = {}
         self.rew_buf[:] = 0.
+        self.rew_pos[:] = 0.
+        self.rew_neg[:] = 0.
         for i in range(len(self.reward_functions)):
             name = self.reward_names[i]
             rew = self.reward_functions[i]() * self.reward_scales[name]
-            self.rew_buf += rew
+            if torch.sum(rew) >= 0:
+                self.rew_pos += rew
+            elif torch.sum(rew) <= 0:
+                self.rew_neg += rew
             episode_cumulative[name] = rew
+
+            # if name == 'tracking_lin_vel':
+            #     print("max velocity",torch.max(self.reward_functions[i]()).item(), self.reward_scales[name])
+                
+
+            if name in ['tracking_contacts_shaped_force', 'tracking_contacts_shaped_vel']:
+                self.command_sums[name] += self.reward_scales[name] + rew
+            else:
+                self.command_sums[name] += rew
         
+
+        if self.postive_reward_ji22:
+            self.rew_buf[:] = self.rew_pos[:] * torch.exp(self.rew_neg[:] / self.sigma_rew_neg)
+        else:
+            self.rew_buf = self.rew_pos + self.rew_neg
         extra_info["episode_cumulative"] = episode_cumulative
         self.extras.update(extra_info)
 
@@ -887,22 +957,7 @@ class Go1WallKicker(VecTask):
         pw_ball = root_states[1::4, 0:3]
         pw_goal = root_states[2::4, 0:3]
 
-        self.bboxes_ball = quadric_utils.calc_projected_bbox(self.ball_qstar_element, base_quat, base_pose, self.K_torch, pw_ball)
 
-        pixel_bbox_ball = quadric_utils.convert_bbox_to_01(
-            self.bboxes_ball,
-            self.image_width,
-            self.image_height)
-        
-
-        self.bboxes_goal = quadric_utils.calc_projected_bbox(self.goal_qstar_element, base_quat, base_pose, self.K_torch, pw_goal)
-        pixel_bbox_goal = quadric_utils.convert_bbox_to_01(
-            self.bboxes_ball,
-            self.image_width,
-            self.image_height)
-        
-        # print("=== ball bbox:",pixel_bbox_ball)
-        # print("=== goal bbox:",pixel_bbox_ball)
 
         cat_list = []
         # check dict have key
@@ -924,15 +979,32 @@ class Go1WallKicker(VecTask):
             # print("last_actions:",actions)
             cat_list.append(actions)
 
+        if "gait_sin_indict" in self.cfg["env"]["state_observations"]:
+            cat_list.append(self.clock_inputs)
+
         if "ball_states_p" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_p)
         if "ball_states_v" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_v)
 
         if "pixel_bbox_ball" in self.cfg["env"]["state_observations"]:
+            self.bboxes_ball = quadric_utils.calc_projected_bbox(self.ball_qstar_element, base_quat, base_pose, self.K_torch, pw_ball)
+
+            pixel_bbox_ball = quadric_utils.convert_bbox_to_01(
+            self.bboxes_ball,
+            self.image_width,
+            self.image_height)
+        
             cat_list.append(pixel_bbox_ball)
 
         if "pixel_bbox_goal" in self.cfg["env"]["state_observations"]:
+
+            self.bboxes_goal = quadric_utils.calc_projected_bbox(
+                self.goal_qstar_element, base_quat, base_pose, self.K_torch, pw_goal)
+            pixel_bbox_goal = quadric_utils.convert_bbox_to_01(
+                self.bboxes_ball,
+                self.image_width,
+                self.image_height)
             cat_list.append(pixel_bbox_goal)
 
         if "goal_pose" in self.cfg["env"]["state_observations"]:
@@ -980,6 +1052,7 @@ class Go1WallKicker(VecTask):
             if scale == 0:
                 self.reward_scales.pop(key)
             else:
+                print(f"Reward {key} has nonzero coefficient {scale}, multiplying by dt={self.dt}")
                 self.reward_scales[key] *= self.dt
         # prepare list of functions
         self.reward_functions = []
@@ -995,21 +1068,23 @@ class Go1WallKicker(VecTask):
                 self.reward_functions.append(getattr(self.reward_container, '_reward_' + name))
 
         # reward episode sums
-        self.episode_sums = {
-            name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
-            for name in self.reward_scales.keys()}
-        self.episode_sums["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
-                                                 requires_grad=False)
-        self.episode_sums_eval = {
-            name: -1 * torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
-            for name in self.reward_scales.keys()}
-        self.episode_sums_eval["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
-                                                      requires_grad=False)
+        # self.episode_sums = {
+        #     name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        #     for name in self.reward_scales.keys()}
+        # self.episode_sums["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+        #                                          requires_grad=False)
+        # self.episode_sums_eval = {
+        #     name: -1 * torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        #     for name in self.reward_scales.keys()}
+        # self.episode_sums_eval["total"] = torch.zeros(self.num_envs, dtype=torch.float, device=self.device,
+        #                                               requires_grad=False)
         self.command_sums = {
             name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
             for name in
             list(self.reward_scales.keys()) + ["lin_vel_raw", "ang_vel_raw", "lin_vel_residual", "ang_vel_residual",
                                                "ep_timesteps"]}
+        
+
     def reset_only_target(self, env_ids):
 
         num_ids = len(env_ids)
@@ -1126,11 +1201,17 @@ class Go1WallKicker(VecTask):
                                                gymtorch.unwrap_tensor(self.dof_state),
                                                gymtorch.unwrap_tensor(env_ids_int32 * 4), len(env_ids_int32))
 
+        self.gait_indices[env_ids] = 0
         self.progress_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
+        self.last_targets[env_ids] = 0.
+        self.last_last_targets[env_ids] = 0.
 
         if self.obs_history:
             self.history_buffer[env_ids,:] = torch.tile(self.history_per_begin, (len(env_ids), 1))
+
+        for i in range(len(self.lag_buffer)):
+            self.lag_buffer[i][env_ids, :] = 0
 
     def deferred_set_actor_root_state_tensor_indexed(self, obj_indices: List[torch.Tensor]) -> None:
         self.actor_indices_for_reset.append(obj_indices)
@@ -1151,4 +1232,64 @@ class Go1WallKicker(VecTask):
         )
 
         self.actor_indices_for_reset = []
+
+    def _step_contact_targets(self):
+        self.gait_indices = torch.remainder(self.gait_indices + self.dt * self.frequencies, 1.0)
+
+
+        foot_indices = [self.gait_indices + self.phases + self.offsets + self.bounds,
+                            self.gait_indices + self.offsets,
+                            self.gait_indices + self.bounds,
+                            self.gait_indices + self.phases]
+        
+        self.foot_indices = torch.remainder(torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0)
+
+        for idxs in foot_indices:
+            stance_idxs = torch.remainder(idxs, 1) < self.durations
+            swing_idxs = torch.remainder(idxs, 1) > self.durations
+
+
+            # print(stance_idxs)
+            idxs[stance_idxs] = torch.remainder(idxs[stance_idxs], 1) * (0.5 / self.durations[stance_idxs])
+
+
+            idxs[swing_idxs] = 0.5 + (torch.remainder(idxs[swing_idxs], 1) - self.durations[swing_idxs]) * (
+                        0.5 / (1 - self.durations[swing_idxs]))
+
+        # if self.cfg.commands.durations_warp_clock_inputs:
+
+        self.clock_inputs[:, 0] = torch.sin(2 * np.pi * foot_indices[0])
+        self.clock_inputs[:, 1] = torch.sin(2 * np.pi * foot_indices[1])
+        self.clock_inputs[:, 2] = torch.sin(2 * np.pi * foot_indices[2])
+        self.clock_inputs[:, 3] = torch.sin(2 * np.pi * foot_indices[3])
+
+        
+        smoothing_cdf_start = torch.distributions.normal.Normal(0,
+                                                                self.kappa).cdf  # (x) + torch.distributions.normal.Normal(1, kappa).cdf(x)) / 2
+
+        smoothing_multiplier_FL = (smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0)) * (
+                1 - smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 0.5)) +
+                                    smoothing_cdf_start(torch.remainder(foot_indices[0], 1.0) - 1) * (
+                                            1 - smoothing_cdf_start(
+                                        torch.remainder(foot_indices[0], 1.0) - 0.5 - 1)))
+        smoothing_multiplier_FR = (smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0)) * (
+                1 - smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 0.5)) +
+                                    smoothing_cdf_start(torch.remainder(foot_indices[1], 1.0) - 1) * (
+                                            1 - smoothing_cdf_start(
+                                        torch.remainder(foot_indices[1], 1.0) - 0.5 - 1)))
+        smoothing_multiplier_RL = (smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0)) * (
+                1 - smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 0.5)) +
+                                    smoothing_cdf_start(torch.remainder(foot_indices[2], 1.0) - 1) * (
+                                            1 - smoothing_cdf_start(
+                                        torch.remainder(foot_indices[2], 1.0) - 0.5 - 1)))
+        smoothing_multiplier_RR = (smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0)) * (
+                1 - smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 0.5)) +
+                                    smoothing_cdf_start(torch.remainder(foot_indices[3], 1.0) - 1) * (
+                                            1 - smoothing_cdf_start(
+                                        torch.remainder(foot_indices[3], 1.0) - 0.5 - 1)))
+
+        self.desired_contact_states[:, 0] = smoothing_multiplier_FL
+        self.desired_contact_states[:, 1] = smoothing_multiplier_FR
+        self.desired_contact_states[:, 2] = smoothing_multiplier_RL
+        self.desired_contact_states[:, 3] = smoothing_multiplier_RR
 

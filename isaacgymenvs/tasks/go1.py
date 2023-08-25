@@ -705,6 +705,10 @@ class Go1(VecTask):
                     self.cfg["env"]["randomCommandVelocityRanges"]["yaw"][1]
                 ))
                 wandb.log({"curriculum": plt.imshow(torch.mean(self.curriculum.weights_shaped, axis=1).cpu(), cmap='gray',vmin=0.,vmax=1.).get_figure()})
+                total_grid_num = self.curriculum.weights_shaped.numel()
+                total_grid_weight = torch.sum(self.curriculum.weights_shaped).item()
+                wandb.log({"curriculum complete rate": 
+                           total_grid_weight/total_grid_num})
 
 
     def compute_observations(self):
@@ -962,7 +966,6 @@ class Go1(VecTask):
                             self.gait_indices + self.bounds,
                             self.gait_indices + self.phases]
         
-        # have bug??? ==================
         self.foot_indices = torch.remainder(torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0)
 
         for idxs in foot_indices:

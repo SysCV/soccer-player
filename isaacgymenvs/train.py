@@ -94,20 +94,23 @@ def launch_rlg_hydra(cfg: DictConfig):
     from rl_games.common import env_configurations, vecenv
     from rl_games.torch_runner import Runner
     from rl_games.algos_torch import model_builder
+    from rl_games.algos_torch import a2c_continuous
+
     from isaacgymenvs.learning import amp_continuous
     from isaacgymenvs.learning import amp_players
     from isaacgymenvs.learning import amp_models
     from isaacgymenvs.learning import amp_network_builder
-    from isaacgymenvs.learning import handwrite_network_builder
-    from isaacgymenvs.learning import handwirte_agent
-    from isaacgymenvs.learning import handwrite_player
 
-    from rl_games.algos_torch import a2c_continuous
+    from isaacgymenvs.learning.handwrite_pixel import handwrite_network_builder
+    from isaacgymenvs.learning.handwrite_pixel import handwirte_agent
+    from isaacgymenvs.learning.handwrite_pixel import handwrite_player
+
+
     from isaacgymenvs.learning.history import history_network_builder
 
     from isaacgymenvs.learning.baseline import state_network_builder
-    from isaacgymenvs.learning.baseline import state_player
-    from isaacgymenvs.learning.baseline import state_player_eval
+#     from isaacgymenvs.learning.baseline import state_player
+    from isaacgymenvs.learning.baseline import state_player_eval as state_player
 
     from isaacgymenvs.learning.sea import sea_agent
     from isaacgymenvs.learning.sea import sea_models
@@ -120,7 +123,7 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning.waq import waq_agent
     from isaacgymenvs.learning.waq import waq_models
     from isaacgymenvs.learning.waq import waq_network_builder
-    from isaacgymenvs.learning.waq import waq_player
+    from isaacgymenvs.learning.waq import waq_player_eval as waq_player
 
 
     from isaacgymenvs.learning import common_player,common_agent
@@ -215,7 +218,7 @@ def launch_rlg_hydra(cfg: DictConfig):
 
 
         runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : amp_continuous.AMPAgent(**kwargs))
-        runner.player_factory.register_builder('base_ac', lambda **kwargs : a2c_continuous.A2CAgent(**kwargs))
+        runner.algo_factory.register_builder('base_ac', lambda **kwargs : a2c_continuous.A2CAgent(**kwargs))
         runner.algo_factory.register_builder('pixel_ac', lambda **kwargs : handwirte_agent.A2CPixelAgent(**kwargs))
         runner.algo_factory.register_builder('common_ac', lambda **kwargs : common_agent.CommonAgent(**kwargs))
         runner.algo_factory.register_builder('sea_ac', lambda **kwargs : sea_agent.A2CAgent(**kwargs))
@@ -227,8 +230,8 @@ def launch_rlg_hydra(cfg: DictConfig):
         runner.player_factory.register_builder('pixel_ac', lambda **kwargs : handwrite_player.PpoPixelPlayerContinuous(**kwargs))
         runner.player_factory.register_builder('common_ac', lambda **kwargs : common_player.CommonPlayer(**kwargs))
 
-        runner.player_factory.register_builder('real_ac', lambda **kwargs : state_player.Player(**kwargs))
-        runner.player_factory.register_builder('base_ac', lambda **kwargs : state_player_eval.Player(**kwargs))
+        # runner.player_factory.register_builder('real_ac', lambda **kwargs : state_player.Player(**kwargs))
+        runner.player_factory.register_builder('base_ac', lambda **kwargs : state_player.Player(**kwargs))
         runner.player_factory.register_builder('waq_ac', lambda **kwargs : waq_player.Player(**kwargs))
 
         

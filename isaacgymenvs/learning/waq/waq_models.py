@@ -27,7 +27,7 @@ class ModelContinuous(ModelA2CContinuousLogStd):
                     } 
                 return result
             else:
-                mu, logstd, value, states = self.a2c_network(input_dict)
+                mu, logstd, value, states, v_est = self.a2c_network(input_dict)
                 sigma = torch.exp(logstd)
                 distr = torch.distributions.Normal(mu, sigma, validate_args=False)
                 if is_train:
@@ -51,6 +51,7 @@ class ModelContinuous(ModelA2CContinuousLogStd):
                         'actions' : selected_action,
                         'rnn_states' : states,
                         'mus' : mu,
-                        'sigmas' : sigma
+                        'sigmas' : sigma,
+                        'v_est' : v_est
                     }
                     return result

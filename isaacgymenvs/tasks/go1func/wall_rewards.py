@@ -11,15 +11,6 @@ class RewardTerms:
         self.env = env
 
     # ------------ reward functions----------------
-    def _reward_tracking_lin_vel(self):
-        # Tracking of linear velocity commands (xy axes)
-        lin_vel_error = torch.sum(torch.square(self.env.commands[:, :2] - self.env.base_lin_vel[:, :2]), dim=1)
-        return torch.exp(-lin_vel_error / self.env.cfg.rewards.tracking_sigma)
-
-    def _reward_tracking_ang_vel(self):
-        # Tracking of angular velocity commands (yaw)
-        ang_vel_error = torch.square(self.env.commands[:, 2] - self.env.base_ang_vel[:, 2])
-        return torch.exp(-ang_vel_error / self.env.cfg.rewards.tracking_sigma_yaw)
 
     def _reward_ball_speed(self):
         ball_speed_square = torch.sum(torch.square(self.env.ball_lin_vel_xy_world), dim=1)
@@ -29,10 +20,6 @@ class RewardTerms:
     def _reward_torque(self):
         rew_torque = torch.sum(torch.square(self.env.torques), dim=1)
         return rew_torque
-
-    def _reward_ball_height(self):
-        ball_z = self.env.ball_pos[:, 2]
-        ball_z_reward = torch.exp(ball_z)
 
     def _reward_dog_heading_ball(self):
         robot_heading = torch.tensor([[1., 0., 0.]] * self.env.base_pos.size(0), device=self.env.root_states.device)
@@ -49,7 +36,7 @@ class RewardTerms:
     def _reward_ball_dog_dis(self):
         ball_dog_distance_error = torch.sum(torch.square(self.env.ball_pos - self.env.base_pos), dim=1)
         ball_dog_distance_error = torch.clamp_min(ball_dog_distance_error, self.env.reward_params["ball_dog_dis"]["clip_min"])
-        rew_ball_dog_distance = torch.exp(-ball_dog_distance_error)
+        rew_ball_dog_distance = torch.exp(-1 * self.env.reward_params["ball_dog_dis"]["sigma"] * ball_dog_distance_error)
         return rew_ball_dog_distance
 
     def _reward_ball_goal_dis(self):
@@ -110,8 +97,68 @@ class RewardTerms:
         return torch.sum(1. * (torch.norm(self.env.contact_forces[:, self.env.penalised_contact_indices, :], dim=-1) > 0.1),
                          dim=1)
     
-    def _reward_ball_height(self):
-        ball_z = self.env.ball_pos[:, 2]
-        # ball_z_reward = torch.exp(ball_z)
-        return ball_z
+    def _reward_torque(self):
+            rew_torque = torch.sum(torch.square(self.env.torques), dim=1)
+            return rew_torque
+        
+    def _reward_orientation(self):
+        # Penalize non flat base orientation
+        return torch.sum(torch.square(self.env.projected_gravity[:, :2]), dim=1)
+
+    def _reward_action_rate(self):
+        # Penalize changes in actions
+        return torch.sum(torch.square(self.env.last_actions - self.env.actions), dim=1)
+
+    def _reward_action_smoothness_1(self):
+        # Penalize changes in actions
+        diff = torch.square(self.env.last_targets - self.env.targets)
+        diff = diff * (self.env.last_targets != 0)  # ignore first step
+        return torch.sum(diff, dim=1)
+
+    def _reward_action_smoothness_2(self):
+        # Penalize changes in actions
+        diff = torch.square(self.env.targets - 2 * self.env.last_targets + self.env.last_last_targets)
+        diff = diff * (self.env.last_targets != 0)  # ignore first step
+        diff = diff * (self.env.last_last_targets != 0)  # ignore second step
+        return torch.sum(diff, dim=1)
+
+
+    def _reward_dof_pos(self):
+        # Penalize dof positions
+        return torch.sum(torch.square(self.env.dof_pos - self.env.default_dof_pos), dim=1)
+
+    def _reward_dof_vel(self):
+        # Penalize dof velocities
+        return torch.sum(torch.square(self.env.dof_vel), dim=1)
+
+    # def _reward_base_height(self):
+    #     # Penalize base height
+    #     return torch.square(self.env.base_pos[:, 2] - self.env.reward_params["base_height"]["target"])
+
+    def _reward_lin_vel_z(self):
+        # Reward forward velocity
+        return torch.square(self.env.base_lin_vel[:, 2])
+
+    def _reward_tracking_contacts_shaped_force(self):
+        foot_forces = torch.norm(self.env.contact_forces[:, self.env.feet_indices, :], dim=-1)
+        desired_contact = self.env.desired_contact_states
+
+        reward = 0
+        for i in range(4):
+            reward += - (1 - desired_contact[:, i]) * (
+                        1 - torch.exp(-1 * foot_forces[:, i] ** 2 / self.env.reward_params["tracking_contacts_shaped_force"]["sigma"]))
+        return reward / 4
+
+    def _reward_tracking_contacts_shaped_vel(self):
+        foot_velocities = torch.norm(self.env.foot_velocities, dim=2).view(self.env.num_envs, -1)
+        desired_contact = self.env.desired_contact_states
+        reward = 0
+        for i in range(4):
+            reward += - (desired_contact[:, i] * (
+                        1 - torch.exp(-1 * foot_velocities[:, i] ** 2 / self.env.reward_params["tracking_contacts_shaped_vel"]["sigma"])))
+        return reward / 4
+
+    def _reward_dof_acc(self):
+        # Penalize dof accelerations
+        return torch.sum(torch.square((self.env.last_dof_vel - self.env.dof_vel) / self.env.dt), dim=1)
 

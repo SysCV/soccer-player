@@ -196,42 +196,8 @@ class Go1Real(VecTask):
 
         self.total_train_env_frames: int = 0
 
-        # number of control steps
-        self.control_steps: int = 0
-
-        self.render_fps: int = config["env"].get("renderFPS", -1)
-        self.last_frame_time: float = 0.0
-        self.obs_dict = {}
-
-
-
-        self.obs_buf = torch.zeros(
-            (self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
-        self.states_buf = torch.zeros(
-            (self.num_envs, self.num_states), device=self.device, dtype=torch.float)
-        self.rew_buf = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.float)
-        self.reset_buf = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.long) # in real, never reset
-        self.timeout_buf = torch.zeros(
-             self.num_envs, device=self.device, dtype=torch.long)
-        self.progress_buf = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.long)
-        self.randomize_buf = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.long)
-        self.lag_buffer = [torch.zeros(self.num_envs, 12, device=self.device, dtype=torch.float) for i in range(self.cfg["env"]["action_lag_step"]+1)]
+        self.init_monitors()
         
-        self.gait_indices = torch.zeros(self.num_envs, device=self.device,dtype=torch.float)
-        self.clock_inputs = torch.zeros((self.num_envs, 4), device=self.device,dtype=torch.float)
-        
-        if self.obs_history:
-            assert self.num_obs == 46, "total_obs_dim should be 43"
-            zero_obs = torch.zeros(self.num_obs, dtype=torch.float32, device=self.device)
-            zero_obs[2] = -1 # default gravity
-            self.history_per_begin = torch.tile(zero_obs, (self.history_length,))
-            self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs,1))
-
-        self.extras = {}
 
         # ==================== for real robot =====================
         print("Initializing the real robot .....................")
@@ -259,6 +225,65 @@ class Go1Real(VecTask):
 
 
         self.calibrate()
+
+    def init_monitors(self):
+        # number of control steps
+        self.control_steps: int = 0
+
+        self.render_fps: int = self.cfg["env"].get("renderFPS", -1)
+        self.last_frame_time: float = 0.0
+        self.obs_dict = {}
+
+        # is empty, just for compatibility
+        self.base_lin_vel = torch.zeros(
+            (self.num_envs, 3), device=self.device, dtype=torch.float)
+        self.base_ang_vel = torch.zeros(
+            (self.num_envs, 3), device=self.device, dtype=torch.float)
+
+        self.obs_buf = torch.zeros(
+            (self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
+        self.states_buf = torch.zeros(
+            (self.num_envs, self.num_states), device=self.device, dtype=torch.float)
+        self.rew_buf = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.float)
+        self.reset_buf = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long) # in real, never reset
+        self.timeout_buf = torch.zeros(
+             self.num_envs, device=self.device, dtype=torch.long)
+        self.progress_buf = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long)
+        self.randomize_buf = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long)
+        self.lag_buffer = [torch.zeros(self.num_envs, 12, device=self.device, dtype=torch.float) for i in range(self.cfg["env"]["action_lag_step"]+1)]
+
+        self.commands = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
+
+        # default joint positions
+        self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
+
+        joint_names = [
+            "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+            "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+            "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+            "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint", ]
+        # this is in right order
+        
+        self.default_dof_pos = torch.tensor([self.cfg["env"]["defaultJointAngles"][name] for name in joint_names]).unsqueeze(0).repeat(self.num_envs, 1).to(self.device)
+
+        self.dof_pos = self.default_dof_pos.clone()
+        self.dof_vel = torch.zeros(self.num_envs, 12, dtype=torch.float, device=self.device, requires_grad=False)
+        
+        self.gait_indices = torch.zeros(self.num_envs, device=self.device,dtype=torch.float)
+        self.clock_inputs = torch.zeros((self.num_envs, 4), device=self.device,dtype=torch.float)
+        
+        if self.obs_history:
+            assert self.num_obs == 46, "total_obs_dim should be 46"
+            zero_obs = torch.zeros(self.num_obs, dtype=torch.float32, device=self.device)
+            zero_obs[2] = -1 # default gravity
+            self.history_per_begin = torch.tile(zero_obs, (self.history_length,))
+            self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs,1))
+
+        self.extras = {}
 
     def create_sim(self):
         pass
@@ -450,10 +475,11 @@ class Go1Real(VecTask):
         gravity_vec = obs[:,0:3]
         commands = obs[:,3:6]
         
-        commands[:, :2] *= (torch.norm(commands[:, :2], dim=1) > 0.2).unsqueeze(1)
+        self.commands[:, :3] = commands[:, :3]
         # print("command:", commands)
         dof_pos = obs[:,6:18]
-        dof_vel = obs[:,18:30]
+        self.dof_pos = dof_pos + self.default_dof_pos
+        self.dof_vel = obs[:,18:30]
         actions = obs[:,30:42] # actions are not used in real robot
         # print("=== actions: ", actions)
         contact_states = obs[:,42:46]
@@ -469,7 +495,7 @@ class Go1Real(VecTask):
 
         projected_gravity = gravity_vec
         dof_pos_scaled = dof_pos * dof_pos_scale
-        dof_vel_scaled = dof_vel * dof_vel_scale
+        dof_vel_scaled = self.dof_vel * dof_vel_scale
         commands_scaled = commands*torch.tensor([lin_vel_scale, lin_vel_scale, ang_vel_scale], requires_grad=False, device=commands.device)
 
 

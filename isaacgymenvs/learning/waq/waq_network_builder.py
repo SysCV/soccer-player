@@ -175,7 +175,7 @@ class A2CBuilder(network_builder.NetworkBuilder):
                     sigma = self.sigma_act(self.sigma)
                 else:
                     sigma = self.sigma_act(self.sigma(out))
-                return mu, mu*0 + sigma, value, states
+                return mu, mu*0 + sigma, value, states, v_est
                     
         def is_separate_critic(self):
             return self.separate

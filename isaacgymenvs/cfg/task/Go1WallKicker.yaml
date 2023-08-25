@@ -5,7 +5,7 @@ physics_engine: ${..physics_engine}
 
 env:
 
-  numEnvs: ${resolve_default:4000,${...num_envs}}
+  numEnvs: ${resolve_default:8000,${...num_envs}}
   envSpacing: 2.  # [m]
 
   cameraSensorPlt: false
@@ -13,15 +13,26 @@ env:
   obs_history: false
   history_length: 15
 
+  action_lag_step: 1
+
+  gait_condition:
+    # trotting [0.5,0,0] pacing [0,0,0.5]
+    phases: 0.5
+    offsets: 0.0
+    bounds: 0.0
+    kappa: 0.07
+    frequency: 3.0
+    duration: 0.5
 
   state_obs: false
   state_observations:
-    # base_lin_vel: 3
-    # base_ang_vel: 3
+    base_lin_vel: 3
+    base_ang_vel: 3
     projected_gravity: 3
     dof_pos: 12
     dof_vel: 12
     last_actions: 12
+    gait_sin_indict: 4
 
     ball_states_p: 3
     goal_pose: 3
@@ -30,8 +41,8 @@ env:
     # pixel_bbox_goal: 4
 
     ball_states_v: 3
-    #base_pose: 3
-    #base_quat: 4
+    base_pose: 3
+    base_quat: 4
 
   pixel_observations:
     enable: false
@@ -53,11 +64,8 @@ env:
 
   terminateCondition:
     robot_x_range: [-1.0, 1.5] # [m]
-    ball_x_range: [-1.5, 3.5] # [m]
-    ball_y_range: [-3, 3] # [m]
-
-
-
+    ball_x_range: [-1.0, 3.5] # [m]
+    ball_y_range: [-2, 2] # [m]
 
   clipObservations: 5.0
   clipActions: 1.0
@@ -75,7 +83,7 @@ env:
 
   goalInitState:
     pos: [ 3.0, 0.0, 0.15 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 1.5, 0.0]
+    randomPosRange: [ 0.0, 0.0, 0.0]
 
   wallInitState:
     pos: [ 3.01, 0.0, 0.5 ] # x,y,z [m]
@@ -87,22 +95,12 @@ env:
     # ballInitSpeed: -1.0 # [m/s]
     mass: 0.35 # [kg]
 
-  # randomBallStateRanges:
-  #   pos_x: [-0.5, 0.5] # min max [m]
-  #   pos_y: [-0.5, 0.5] # min max [m]
-  #   v_x: [-2.5, 2.5] # min max [m/s]
-  #   v_y: [-2.5, 2.5] # min max [m/s]
-
-  # randomCommandVelocityRanges:
-  #   linear_x: [-2., 2.] # min max [m/s]
-  #   linear_y: [-2., 2.]   # min max [m/s]
-  #   yaw: [-1., 1.]          # min max [rad/s]
-
   control:
     # PD Drive parameters:
     stiffness: 20.0  # [N*m/rad]
     damping: 0.5   # [N*m*s/rad]
     actionScale: 0.5
+    hipAddtionalScale: 0.5
     controlFrequencyInv: 1 # 60 Hz
     # todo: change to a1 param?
 
@@ -123,30 +121,60 @@ env:
     RR_calf_joint: -1.5     # [rad]
 
   rewards:
+    only_positive_rewards_ji22_style: True
+    sigma_rew_neg: 0.02 # is important!!
+    
     rewardScales:
-      ball_speed: 1.0
-      torque: -0.00025
-      dog_heading_ball: 0.5 # once been 1/200
+      ball_speed: 0.5
+
+      dog_heading_ball: 0.1 # once been 1/200
+      
+      dog_wall_dis: 0.4
+
       ball_dog_dis: 2.0
-      ball_goal_dis: 4.0
-      hit_wall_and_switch: 50.0
-      catch_and_switch: 50.0
-      dog_wall_dis: 0.5
-      collision: -10.0
+
+      ball_goal_dis: 1.0
+
+      # sparse reward need times episode length 20
+      hit_wall_and_switch: 40.0
+      catch_and_switch: 40.0
+
+      collision: -5.0
+      orientation: -5.0
+      lin_vel_z: -0.02
+      torque: -0.0001
+      dof_pos: -0.05
+      dof_acc: -2.5e-7
+      dof_vel: -0.0001
+      action_rate: -0.01 # when have lag, it will be different with smoothness
+      action_smoothness_1: -0.1
+      action_smoothness_2: -0.1
+
+      # base_height: -0.001
+
+      # walk this way, this replace the feet air time
+      tracking_contacts_shaped_force: 4.0
+      tracking_contacts_shaped_vel: 4.0
       # ball_height: 2.0
 
 
     rewardParams:
       ball_speed:
-        clip_max: 3.0
+        clip_max: 2.0
       ball_dog_dis:
-        clip_min: 0.5
+        clip_min: 0.3
+        sigma: 4.0
       dog_wall_dis:
         good_dis: 2.5
       hit_wall_and_switch:
-        success_bonus_scale: 100.0
+        success_bonus_scale: 32.0
         hit_times_penalty: 0.3
-        valid_success_range: 0.10
+        valid_success_range: 0.15
+
+      tracking_contacts_shaped_force:
+        sigma: 100.
+      tracking_contacts_shaped_vel:
+        sigma: 10.
 
 
       
@@ -173,7 +201,7 @@ env:
     
     # termination
     maxInGroundLength_s: 20
-    maxStableLength_s: 4
+    maxStableLength_s: 3
 
   # viewer cam:
   viewer:

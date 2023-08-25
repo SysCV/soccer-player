@@ -12,7 +12,7 @@ env:
   history_length: 15
 
 
-  action_lag_step: 5
+  action_lag_step: 0
 
   observe_contact_states: false
 
@@ -85,13 +85,8 @@ env:
     RR_calf_joint: -1.5     # [rad]
 
   learn:
-    # rewards
-    linearVelocityXYRewardScale: 1.0
-    angularVelocityZRewardScale: 0.5
-    torqueRewardScale: -0.000025 
-
     # normalization
-    linearVelocityScale: 2.0
+    linearVelocityScale: 0.5
     angularVelocityScale: 0.25
     dofPositionScale: 1.0
     dofVelocityScale: 0.05
