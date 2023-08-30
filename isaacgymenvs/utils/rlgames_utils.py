@@ -52,19 +52,19 @@ def multi_gpu_get_rank(multi_gpu):
 
 
 def get_rlgames_env_creator(
-        # used to create the vec task
-        seed: int,
-        task_config: dict,
-        task_name: str,
-        sim_device: str,
-        rl_device: str,
-        graphics_device_id: int,
-        headless: bool,
-        # used to handle multi-gpu case
-        multi_gpu: bool = False,
-        post_create_hook: Callable = None,
-        virtual_screen_capture: bool = False,
-        force_render: bool = False,
+    # used to create the vec task
+    seed: int,
+    task_config: dict,
+    task_name: str,
+    sim_device: str,
+    rl_device: str,
+    graphics_device_id: int,
+    headless: bool,
+    # used to handle multi-gpu case
+    multi_gpu: bool = False,
+    post_create_hook: Callable = None,
+    virtual_screen_capture: bool = False,
+    force_render: bool = False,
 ):
     """Parses the configuration parameters for the environment task and creates a VecTask
 
@@ -78,17 +78,17 @@ def get_rlgames_env_creator(
         multi_gpu: Whether to use multi gpu
         post_create_hook: Hooks to be called after environment creation.
             [Needed to setup WandB only for one of the RL Games instances when doing multiple GPUs]
-        virtual_screen_capture: Set to True to allow the users get captured screen in RGB array via `env.render(mode='rgb_array')`. 
+        virtual_screen_capture: Set to True to allow the users get captured screen in RGB array via `env.render(mode='rgb_array')`.
         force_render: Set to True to always force rendering in the steps (if the `control_freq_inv` is greater than 1 we suggest stting this arg to True)
     Returns:
         A VecTaskPython object.
     """
+
     def create_rlgpu_env():
         """
         Creates the task from configurations and wraps it using RL-games wrappers if required.
         """
         if multi_gpu:
-
             local_rank = int(os.getenv("LOCAL_RANK", "0"))
             global_rank = int(os.getenv("RANK", "0"))
 
@@ -99,13 +99,15 @@ def get_rlgames_env_creator(
             # total number of GPUs across all nodes
             world_size = int(os.getenv("WORLD_SIZE", "1"))
 
-            print(f"global_rank = {global_rank} local_rank = {local_rank} world_size = {world_size}")
+            print(
+                f"global_rank = {global_rank} local_rank = {local_rank} world_size = {world_size}"
+            )
 
-            _sim_device = f'cuda:{local_rank}'
-            _rl_device = f'cuda:{local_rank}'
+            _sim_device = f"cuda:{local_rank}"
+            _rl_device = f"cuda:{local_rank}"
 
-            task_config['rank'] = local_rank
-            task_config['rl_device'] = _rl_device
+            task_config["rank"] = local_rank
+            task_config["rl_device"] = _rl_device
         else:
             _sim_device = sim_device
             _rl_device = rl_device
@@ -125,11 +127,12 @@ def get_rlgames_env_creator(
             post_create_hook()
 
         return env
+
     return create_rlgpu_env
 
 
 class RLGPUAlgoObserver(AlgoObserver):
-    """Allows us to log stats from the env along with the algorithm running stats. """
+    """Allows us to log stats from the env along with the algorithm running stats."""
 
     def __init__(self):
         super().__init__()
@@ -148,15 +151,16 @@ class RLGPUAlgoObserver(AlgoObserver):
         self.writer = self.algo.writer
 
     def process_infos(self, infos, done_indices):
-        assert isinstance(infos, dict), 'RLGPUAlgoObserver expects dict info'
+        assert isinstance(infos, dict), "RLGPUAlgoObserver expects dict info"
         if not isinstance(infos, dict):
             return
 
-        if 'episode' in infos:
-            self.ep_infos.append(infos['episode'])
+        if "episode" in infos:
+            self.ep_infos.append(infos["episode"])
 
-        if 'episode_cumulative' in infos:
-            for key, value in infos['episode_cumulative'].items():
+        if "episode_cumulative" in infos:
+            for key, value in infos["episode_cumulative"].items():
+                # print("cumulate:", key)
                 if key not in self.episode_cumulative:
                     self.episode_cumulative[key] = torch.zeros_like(value)
                 self.episode_cumulative[key] += value
@@ -165,25 +169,35 @@ class RLGPUAlgoObserver(AlgoObserver):
                 self.new_finished_episodes = True
                 done_idx = done_idx.item()
 
-                for key, value in infos['episode_cumulative'].items():
+                for key, value in infos["episode_cumulative"].items():
                     if key not in self.episode_cumulative_avg:
-                        self.episode_cumulative_avg[key] = deque([], maxlen=self.algo.games_to_track)
+                        self.episode_cumulative_avg[key] = deque(
+                            [], maxlen=self.algo.games_to_track
+                        )
 
-                    self.episode_cumulative_avg[key].append(self.episode_cumulative[key][done_idx].item())
+                    self.episode_cumulative_avg[key].append(
+                        self.episode_cumulative[key][done_idx].item()
+                    )
                     self.episode_cumulative[key][done_idx] = 0
 
         # turn nested infos into summary keys (i.e. infos['scalars']['lr'] -> infos['scalars/lr']
         if len(infos) > 0 and isinstance(infos, dict):  # allow direct logging from env
-            infos_flat = flatten_dict(infos, prefix='', separator='/')
+            infos_flat = flatten_dict(infos, prefix="", separator="/")
             self.direct_info = {}
             self.media_info = {}
             for k, v in infos_flat.items():
                 # only log scalars
-                if isinstance(v, float) or isinstance(v, int) or (isinstance(v, torch.Tensor) and len(v.shape) == 0):
+                if (
+                    isinstance(v, float)
+                    or isinstance(v, int)
+                    or (isinstance(v, torch.Tensor) and len(v.shape) == 0)
+                ):
                     self.direct_info[k] = v
                 else:
-                    if isinstance(v, plt.Figure): #TODO: handle other types, limit to some types
-                        print(f'have figure {k}')
+                    if isinstance(
+                        v, plt.Figure
+                    ):  # TODO: handle other types, limit to some types
+                        print(f"have figure {k}")
                         self.media_info[k] = v
 
     def after_print_stats(self, frame, epoch_num, total_time):
@@ -196,27 +210,41 @@ class RLGPUAlgoObserver(AlgoObserver):
                         ep_info[key] = torch.Tensor([ep_info[key]])
                     if len(ep_info[key].shape) == 0:
                         ep_info[key] = ep_info[key].unsqueeze(0)
-                    infotensor = torch.cat((infotensor, ep_info[key].to(self.algo.device)))
+                    infotensor = torch.cat(
+                        (infotensor, ep_info[key].to(self.algo.device))
+                    )
                 value = torch.mean(infotensor)
-                self.writer.add_scalar('Episode/' + key, value, epoch_num)
+                self.writer.add_scalar("Episode/" + key, value, epoch_num)
             self.ep_infos.clear()
-        
+
         # log these if and only if we have new finished episodes
         if self.new_finished_episodes:
             for key in self.episode_cumulative_avg:
-                self.writer.add_scalar(f'episode_cumulative/{key}', np.mean(self.episode_cumulative_avg[key]), frame)
-                self.writer.add_scalar(f'episode_cumulative_min/{key}_min', np.min(self.episode_cumulative_avg[key]), frame)
-                self.writer.add_scalar(f'episode_cumulative_max/{key}_max', np.max(self.episode_cumulative_avg[key]), frame)
+                self.writer.add_scalar(
+                    f"episode_cumulative/{key}",
+                    np.mean(self.episode_cumulative_avg[key]),
+                    frame,
+                )
+                self.writer.add_scalar(
+                    f"episode_cumulative_min/{key}_min",
+                    np.min(self.episode_cumulative_avg[key]),
+                    frame,
+                )
+                self.writer.add_scalar(
+                    f"episode_cumulative_max/{key}_max",
+                    np.max(self.episode_cumulative_avg[key]),
+                    frame,
+                )
             self.new_finished_episodes = False
 
         for k, v in self.direct_info.items():
-            self.writer.add_scalar(f'{k}/frame', v, frame)
-            self.writer.add_scalar(f'{k}/iter', v, epoch_num)
-            self.writer.add_scalar(f'{k}/time', v, total_time)
+            self.writer.add_scalar(f"{k}/frame", v, frame)
+            self.writer.add_scalar(f"{k}/iter", v, epoch_num)
+            self.writer.add_scalar(f"{k}/time", v, total_time)
 
         for k, v in self.media_info.items():
-            print(f'add figure {k}')
-            self.writer.add_figure(f'{k}', v, frame)
+            print(f"add figure {k}")
+            self.writer.add_figure(f"{k}", v, frame)
         self.media_info.clear()
 
 
@@ -232,34 +260,36 @@ class MultiObserver(AlgoObserver):
             getattr(o, method)(*args_, **kwargs_)
 
     def before_init(self, base_name, config, experiment_name):
-        self._call_multi('before_init', base_name, config, experiment_name)
+        self._call_multi("before_init", base_name, config, experiment_name)
 
     def after_init(self, algo):
-        self._call_multi('after_init', algo)
+        self._call_multi("after_init", algo)
 
     def process_infos(self, infos, done_indices):
-        self._call_multi('process_infos', infos, done_indices)
+        self._call_multi("process_infos", infos, done_indices)
 
     def after_steps(self):
-        self._call_multi('after_steps')
+        self._call_multi("after_steps")
 
     def after_clear_stats(self):
-        self._call_multi('after_clear_stats')
+        self._call_multi("after_clear_stats")
 
     def after_print_stats(self, frame, epoch_num, total_time):
-        self._call_multi('after_print_stats', frame, epoch_num, total_time)
+        self._call_multi("after_print_stats", frame, epoch_num, total_time)
 
 
 class RLGPUEnv(vecenv.IVecEnv):
     def __init__(self, config_name, num_actors, **kwargs):
-        self.env = env_configurations.configurations[config_name]['env_creator'](**kwargs)
+        self.env = env_configurations.configurations[config_name]["env_creator"](
+            **kwargs
+        )
 
     def step(self, actions):
         return self.env.step(actions)
 
     def reset(self):
         return self.env.reset()
-    
+
     def reset_done(self):
         return self.env.reset_done()
 
@@ -268,17 +298,17 @@ class RLGPUEnv(vecenv.IVecEnv):
 
     def get_env_info(self):
         info = {}
-        info['action_space'] = self.env.action_space
-        info['observation_space'] = self.env.observation_space
+        info["action_space"] = self.env.action_space
+        info["observation_space"] = self.env.observation_space
 
         if hasattr(self.env, "amp_observation_space"):
-            info['amp_observation_space'] = self.env.amp_observation_space
+            info["amp_observation_space"] = self.env.amp_observation_space
 
         if self.env.num_states > 0:
-            info['state_space'] = self.env.state_space
-            print(info['action_space'], info['observation_space'], info['state_space'])
+            info["state_space"] = self.env.state_space
+            print(info["action_space"], info["observation_space"], info["state_space"])
         else:
-            print(info['action_space'], info['observation_space'])
+            print(info["action_space"], info["observation_space"])
 
         return info
 
@@ -288,7 +318,7 @@ class RLGPUEnv(vecenv.IVecEnv):
         Most common use case: tell the environment how far along we are in the training process. This is useful
         for implementing curriculums and things such as that.
         """
-        if hasattr(self.env, 'set_train_info'):
+        if hasattr(self.env, "set_train_info"):
             self.env.set_train_info(env_frames, *args_, **kwargs_)
 
     def get_env_state(self):
@@ -296,18 +326,17 @@ class RLGPUEnv(vecenv.IVecEnv):
         Return serializable environment state to be saved to checkpoint.
         Can be used for stateful training sessions, i.e. with adaptive curriculums.
         """
-        if hasattr(self.env, 'get_env_state'):
+        if hasattr(self.env, "get_env_state"):
             return self.env.get_env_state()
         else:
             return None
 
     def set_env_state(self, env_state):
-        if hasattr(self.env, 'set_env_state'):
+        if hasattr(self.env, "set_env_state"):
             self.env.set_env_state(env_state)
 
 
 class ComplexObsRLGPUEnv(vecenv.IVecEnv):
-    
     def __init__(
         self,
         config_name,
@@ -330,7 +359,9 @@ class ComplexObsRLGPUEnv(vecenv.IVecEnv):
                     Currently applies to student and teacher both.
                 "space_name" is given into the env info which RL Games reads to find the space shape
         """
-        self.env = env_configurations.configurations[config_name]['env_creator'](**kwargs)
+        self.env = env_configurations.configurations[config_name]["env_creator"](
+            **kwargs
+        )
 
         self.obs_spec = obs_spec
 
@@ -348,7 +379,10 @@ class ComplexObsRLGPUEnv(vecenv.IVecEnv):
         # corresponding to the policy observations and possible asymmetric
         # observations respectively
 
-        rlgames_obs = {k: self.gen_obs_dict(env_obs, v['names'], v['concat']) for k, v in self.obs_spec.items()}
+        rlgames_obs = {
+            k: self.gen_obs_dict(env_obs, v["names"], v["concat"])
+            for k, v in self.obs_spec.items()
+        }
 
         return rlgames_obs
 
@@ -383,17 +417,16 @@ class ComplexObsRLGPUEnv(vecenv.IVecEnv):
         info["action_space"] = self.env.action_space
 
         for k, v in self.obs_spec.items():
-            info[v['space_name']] = self.gen_obs_space(v['names'], v['concat'])
+            info[v["space_name"]] = self.gen_obs_space(v["names"], v["concat"])
 
         return info
-    
+
     def gen_obs_dict(self, obs_dict, obs_names, concat):
         """Generate the RL Games observations given the observations from the environment."""
         if concat:
             return torch.cat([obs_dict[name] for name in obs_names], dim=1)
         else:
             return {k: obs_dict[k] for k in obs_names}
-            
 
     def gen_obs_space(self, obs_names, concat):
         """Generate the RL Games observation space given the observations from the environment."""
@@ -401,13 +434,15 @@ class ComplexObsRLGPUEnv(vecenv.IVecEnv):
             return gym.spaces.Box(
                 low=-np.Inf,
                 high=np.Inf,
-                shape=(sum([self.env.observation_space[s].shape[0] for s in obs_names]),),
+                shape=(
+                    sum([self.env.observation_space[s].shape[0] for s in obs_names]),
+                ),
                 dtype=np.float32,
             )
-        else:        
+        else:
             return gym.spaces.Dict(
-                    {k: self.env.observation_space[k] for k in obs_names}
-                )
+                {k: self.env.observation_space[k] for k in obs_names}
+            )
 
     def set_train_info(self, env_frames, *args_, **kwargs_):
         """
@@ -415,7 +450,7 @@ class ComplexObsRLGPUEnv(vecenv.IVecEnv):
         Most common use case: tell the environment how far along we are in the training process. This is useful
         for implementing curriculums and things such as that.
         """
-        if hasattr(self.env, 'set_train_info'):
+        if hasattr(self.env, "set_train_info"):
             self.env.set_train_info(env_frames, *args_, **kwargs_)
 
     def get_env_state(self):
@@ -423,11 +458,11 @@ class ComplexObsRLGPUEnv(vecenv.IVecEnv):
         Return serializable environment state to be saved to checkpoint.
         Can be used for stateful training sessions, i.e. with adaptive curriculums.
         """
-        if hasattr(self.env, 'get_env_state'):
+        if hasattr(self.env, "get_env_state"):
             return self.env.get_env_state()
         else:
             return None
 
     def set_env_state(self, env_state):
-        if hasattr(self.env, 'set_env_state'):
-            self.env.set_env_state(env_state)                
+        if hasattr(self.env, "set_env_state"):
+            self.env.set_env_state(env_state)

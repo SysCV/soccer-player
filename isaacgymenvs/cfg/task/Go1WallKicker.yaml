@@ -4,9 +4,8 @@ name: Go1WallKicker
 physics_engine: ${..physics_engine}
 
 env:
-
-  numEnvs: ${resolve_default:8000,${...num_envs}}
-  envSpacing: 2.  # [m]
+  numEnvs: ${resolve_default:32000,${...num_envs}}
+  envSpacing: 2. # [m]
 
   cameraSensorPlt: false
 
@@ -43,6 +42,7 @@ env:
     ball_states_v: 3
     base_pose: 3
     base_quat: 4
+    ball_event: 1
 
   pixel_observations:
     enable: false
@@ -57,7 +57,7 @@ env:
     ball_states_p: 3
     ball_states_v: 3
     goal_pose: 3
-    base_pose: 3 
+    base_pose: 3
     base_quat: 4
 
   actions_num: 12
@@ -66,78 +66,77 @@ env:
     robot_x_range: [-1.0, 1.5] # [m]
     ball_x_range: [-1.0, 3.5] # [m]
     ball_y_range: [-2, 2] # [m]
+    valid_catch_range: 0.4 # [m]
+    valid_hit_wall_range: 0.12 # [m]
 
   clipObservations: 5.0
   clipActions: 1.0
 
   plane:
-    staticFriction: 0.8  # [-]
-    dynamicFriction: 0.6  # [-]
-    restitution: 0.9       # [-]
+    staticFriction: 0.8 # [-]
+    dynamicFriction: 0.6 # [-]
+    restitution: 0.9 # [-]
 
   baseInitState:
     pos: [0.0, 0.0, 0.33] # x,y,z [m]
     rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
-    vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
-    vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
+    vLinear: [0.0, 0.0, 0.0] # x,y,z [m/s]
+    vAngular: [0.0, 0.0, 0.0] # x,y,z [rad/s]
 
   goalInitState:
-    pos: [ 3.0, 0.0, 0.15 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 0.0, 0.0]
+    pos: [3.0, 0.0, 0.15] # x,y,z [m]
+    randomPosRange: [0.0, 1.0, 0.0]
 
   wallInitState:
-    pos: [ 3.01, 0.0, 0.5 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 0.0, 0.0]
+    pos: [3.01, 0.0, 0.5] # x,y,z [m]
+    randomPosRange: [0.0, 0.0, 0.0]
 
   ballInitState:
-    pos: [ 0.35, 0.0, 0.13 ] # x,y,z [m]
-    randomPosRange: [ 0.0, 0.5, 0.0]
+    pos: [0.35, 0.0, 0.13] # x,y,z [m]
+    randomPosRange: [0.0, 0.5, 0.0]
     # ballInitSpeed: -1.0 # [m/s]
     mass: 0.35 # [kg]
 
   control:
     # PD Drive parameters:
-    stiffness: 20.0  # [N*m/rad]
-    damping: 0.5   # [N*m*s/rad]
+    stiffness: 20.0 # [N*m/rad]
+    damping: 0.5 # [N*m*s/rad]
     actionScale: 0.5
     hipAddtionalScale: 0.5
     controlFrequencyInv: 1 # 60 Hz
     # todo: change to a1 param?
 
-  defaultJointAngles:  # = target angles when action = 0.0
-    FL_hip_joint: .1   # [rad]
-    RL_hip_joint: 0.1   # [rad]
-    FR_hip_joint: -0.1  # [rad]
-    RR_hip_joint: -0.1    # [rad]
+  defaultJointAngles: # = target angles when action = 0.0
+    FL_hip_joint: .1 # [rad]
+    RL_hip_joint: 0.1 # [rad]
+    FR_hip_joint: -0.1 # [rad]
+    RR_hip_joint: -0.1 # [rad]
 
-    FL_thigh_joint: 0.8     # [rad]
-    RL_thigh_joint: 1.    # [rad]
-    FR_thigh_joint: 0.8     # [rad]
-    RR_thigh_joint: 1.   # [rad]
+    FL_thigh_joint: 0.8 # [rad]
+    RL_thigh_joint: 1. # [rad]
+    FR_thigh_joint: 0.8 # [rad]
+    RR_thigh_joint: 1. # [rad]
 
-    FL_calf_joint: -1.5    # [rad]
-    RL_calf_joint: -1.5    # [rad]
-    FR_calf_joint: -1.5   # [rad]
-    RR_calf_joint: -1.5     # [rad]
+    FL_calf_joint: -1.5 # [rad]
+    RL_calf_joint: -1.5 # [rad]
+    FR_calf_joint: -1.5 # [rad]
+    RR_calf_joint: -1.5 # [rad]
 
   rewards:
     only_positive_rewards_ji22_style: True
     sigma_rew_neg: 0.02 # is important!!
-    
+
     rewardScales:
-      ball_speed: 0.5
-
+      ball_direction_guidance: 0.1
+      ball_speed_norm: 1.0
       dog_heading_ball: 0.1 # once been 1/200
-      
-      dog_wall_dis: 0.4
-
-      ball_dog_dis: 2.0
-
-      ball_goal_dis: 1.0
+      ball_dog_dis: 1.0
+      ball_goal_dis: 0.5
+      robot_y_guidance: 0.1
 
       # sparse reward need times episode length 20
-      hit_wall_and_switch: 40.0
-      catch_and_switch: 40.0
+      hit_wall_and_switch: 20.0
+      catch_and_switch: 80.0
 
       collision: -5.0
       orientation: -5.0
@@ -155,34 +154,35 @@ env:
       # walk this way, this replace the feet air time
       tracking_contacts_shaped_force: 4.0
       tracking_contacts_shaped_vel: 4.0
+      dog_wall_dis: 0.05
       # ball_height: 2.0
 
-
     rewardParams:
-      ball_speed:
-        clip_max: 2.0
+      ball_direction_guidance:
+        sigma: 0.25
+      robot_y_guidance:
+        sigma: 0.25
+      ball_speed_norm:
+        sigma: 9.0 # 3 ** 2
+
       ball_dog_dis:
-        clip_min: 0.3
-        sigma: 4.0
+        clip_min: 0.2
+        sigma: 0.25
+      ball_goal_dis:
+        sigma: 0.25
       dog_wall_dis:
         good_dis: 2.5
       hit_wall_and_switch:
-        success_bonus_scale: 32.0
-        hit_times_penalty: 0.3
-        valid_success_range: 0.15
+        success_bonus_scale: 4.0
+        hit_times_penalty: 1.0
+        valid_success_range: 0.18 # should be greater than terminateCondition.valid_hit_wall_range
 
       tracking_contacts_shaped_force:
         sigma: 100.
       tracking_contacts_shaped_vel:
         sigma: 10.
 
-
-      
-
-
-
-# for a1
-
+  # for a1
 
   urdfAsset:
     collapseFixedJoints: True
@@ -198,7 +198,7 @@ env:
 
     # episode length in seconds
     episodeLength_s: 20
-    
+
     # termination
     maxInGroundLength_s: 20
     maxStableLength_s: 3
@@ -206,8 +206,8 @@ env:
   # viewer cam:
   viewer:
     refEnv: 0
-    pos: [0, 0, 4]  # [m]
-    lookat: [1., 1, 3.3]  # [m]
+    pos: [0, 0, 4] # [m]
+    lookat: [1., 1, 3.3] # [m]
 
   # set to True if you use camera sensors in the environment
   enableCameraSensors: False
@@ -234,14 +234,13 @@ sim:
     contact_collection: 1 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (broken - do not use!)
 
 task:
-
   target_ball: True
   target_goal: True
   have_wall: False
   actor_per_environment: 4
   randomize: False
   randomization_params:
-    frequency: 600   # Define how many environment steps between generating new randomizations
+    frequency: 600 # Define how many environment steps between generating new randomizations
     observations:
       range: [0, .002] # range for the white noise
       operation: "additive"
@@ -250,23 +249,23 @@ task:
       range: [0., .02]
       operation: "additive"
       distribution: "gaussian"
-    sim_params: 
+    sim_params:
       gravity:
         range: [0, 0.4]
         operation: "additive"
         distribution: "gaussian"
-        schedule: "linear"  # "linear" will linearly interpolate between no rand and max rand
+        schedule: "linear" # "linear" will linearly interpolate between no rand and max rand
         schedule_steps: 3000
     actor_params:
       a1:
-#        color: False
+        #        color: False
         rigid_body_properties:
-          mass: 
+          mass:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
             setup_only: True # Property will only be randomized once before simulation is started. See Domain Randomization Documentation for more info.
-            schedule: "linear"  # "linear" will linearly interpolate between no rand and max rand
+            schedule: "linear" # "linear" will linearly interpolate between no rand and max rand
             schedule_steps: 3000
         rigid_shape_properties:
           friction:
@@ -274,36 +273,36 @@ task:
             range: [0.7, 1.3]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
           restitution:
             range: [0., 0.7]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
         dof_properties:
-          damping: 
+          damping:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
-          stiffness: 
+          stiffness:
             range: [0.5, 1.5]
             operation: "scaling"
             distribution: "uniform"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
           lower:
             range: [0, 0.01]
             operation: "additive"
             distribution: "gaussian"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000
           upper:
             range: [0, 0.01]
             operation: "additive"
             distribution: "gaussian"
-            schedule: "linear"  # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
+            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
             schedule_steps: 3000

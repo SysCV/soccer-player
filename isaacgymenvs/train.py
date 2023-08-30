@@ -57,26 +57,30 @@ def preprocess_train_config(cfg, config_dict):
     variable interpolations in each config.
     """
 
-    train_cfg = config_dict['params']['config']
+    train_cfg = config_dict["params"]["config"]
 
-    train_cfg['device'] = cfg.rl_device
+    train_cfg["device"] = cfg.rl_device
 
-    train_cfg['population_based_training'] = cfg.pbt.enabled
-    train_cfg['pbt_idx'] = cfg.pbt.policy_idx if cfg.pbt.enabled else None
+    train_cfg["population_based_training"] = cfg.pbt.enabled
+    train_cfg["pbt_idx"] = cfg.pbt.policy_idx if cfg.pbt.enabled else None
 
-    train_cfg['full_experiment_name'] = cfg.get('full_experiment_name')
+    train_cfg["full_experiment_name"] = cfg.get("full_experiment_name")
 
-    print(f'Using rl_device: {cfg.rl_device}')
-    print(f'Using sim_device: {cfg.sim_device}')
+    print(f"Using rl_device: {cfg.rl_device}")
+    print(f"Using sim_device: {cfg.sim_device}")
     print(train_cfg)
 
     try:
-        model_size_multiplier = config_dict['params']['network']['mlp']['model_size_multiplier']
+        model_size_multiplier = config_dict["params"]["network"]["mlp"][
+            "model_size_multiplier"
+        ]
         if model_size_multiplier != 1:
-            units = config_dict['params']['network']['mlp']['units']
+            units = config_dict["params"]["network"]["mlp"]["units"]
             for i, u in enumerate(units):
                 units[i] = u * model_size_multiplier
-            print(f'Modified MLP units by x{model_size_multiplier} to {config_dict["params"]["network"]["mlp"]["units"]}')
+            print(
+                f'Modified MLP units by x{model_size_multiplier} to {config_dict["params"]["network"]["mlp"]["units"]}'
+            )
     except KeyError:
         pass
 
@@ -85,11 +89,15 @@ def preprocess_train_config(cfg, config_dict):
 
 @hydra.main(config_name="config", config_path="./cfg")
 def launch_rlg_hydra(cfg: DictConfig):
-
     if cfg.pbt.enabled:
         initial_pbt_check(cfg)
 
-    from isaacgymenvs.utils.rlgames_utils import RLGPUEnv, RLGPUAlgoObserver, MultiObserver, ComplexObsRLGPUEnv
+    from isaacgymenvs.utils.rlgames_utils import (
+        RLGPUEnv,
+        RLGPUAlgoObserver,
+        MultiObserver,
+        ComplexObsRLGPUEnv,
+    )
     from isaacgymenvs.utils.wandb_utils import WandbAlgoObserver
     from rl_games.common import env_configurations, vecenv
     from rl_games.torch_runner import Runner
@@ -105,12 +113,14 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning.handwrite_pixel import handwirte_agent
     from isaacgymenvs.learning.handwrite_pixel import handwrite_player
 
-
     from isaacgymenvs.learning.history import history_network_builder
 
     from isaacgymenvs.learning.baseline import state_network_builder
-#     from isaacgymenvs.learning.baseline import state_player
-    from isaacgymenvs.learning.baseline import state_player_eval as state_player
+
+    #     from isaacgymenvs.learning.baseline import state_player
+    from isaacgymenvs.learning.baseline import state_player as state_player
+
+    # _eval
 
     from isaacgymenvs.learning.sea import sea_agent
     from isaacgymenvs.learning.sea import sea_models
@@ -123,12 +133,12 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning.waq import waq_agent
     from isaacgymenvs.learning.waq import waq_models
     from isaacgymenvs.learning.waq import waq_network_builder
-    from isaacgymenvs.learning.waq import waq_player_eval as waq_player
+    from isaacgymenvs.learning.waq import waq_player as waq_player
 
+    # _eval
 
-    from isaacgymenvs.learning import common_player,common_agent
+    from isaacgymenvs.learning import common_player, common_agent
     import isaacgymenvs
-
 
     time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_name = f"{cfg.wandb_name}_{time_str}"
@@ -147,13 +157,15 @@ def launch_rlg_hydra(cfg: DictConfig):
     global_rank = int(os.getenv("RANK", "0"))
 
     # sets seed. if seed is -1 will pick a random one
-    cfg.seed = set_seed(cfg.seed, torch_deterministic=cfg.torch_deterministic, rank=global_rank)
+    cfg.seed = set_seed(
+        cfg.seed, torch_deterministic=cfg.torch_deterministic, rank=global_rank
+    )
 
     def create_isaacgym_env(**kwargs):
         envs = isaacgymenvs.make(
-            cfg.seed, 
-            cfg.task_name, 
-            cfg.task.env.numEnvs, 
+            cfg.seed,
+            cfg.task_name,
+            cfg.task.env.numEnvs,
             cfg.sim_device,
             cfg.rl_device,
             cfg.graphics_device_id,
@@ -174,27 +186,50 @@ def launch_rlg_hydra(cfg: DictConfig):
             )
         return envs
 
-    env_configurations.register('rlgpu', {
-        'vecenv_type': 'RLGPU',
-        'env_creator': lambda **kwargs: create_isaacgym_env(**kwargs),
-    })
+    env_configurations.register(
+        "rlgpu",
+        {
+            "vecenv_type": "RLGPU",
+            "env_creator": lambda **kwargs: create_isaacgym_env(**kwargs),
+        },
+    )
 
     ige_env_cls = isaacgym_task_map[cfg.task_name]
-    dict_cls = ige_env_cls.dict_obs_cls if hasattr(ige_env_cls, 'dict_obs_cls') and ige_env_cls.dict_obs_cls else False
+    dict_cls = (
+        ige_env_cls.dict_obs_cls
+        if hasattr(ige_env_cls, "dict_obs_cls") and ige_env_cls.dict_obs_cls
+        else False
+    )
 
     if dict_cls:
-        
         obs_spec = {}
         actor_net_cfg = cfg.train.params.network
-        obs_spec['obs'] = {'names': list(actor_net_cfg.inputs.keys()), 'concat': not actor_net_cfg.name == "complex_net", 'space_name': 'observation_space'}
+        obs_spec["obs"] = {
+            "names": list(actor_net_cfg.inputs.keys()),
+            "concat": not actor_net_cfg.name == "complex_net",
+            "space_name": "observation_space",
+        }
         if "central_value_config" in cfg.train.params.config:
             critic_net_cfg = cfg.train.params.config.central_value_config.network
-            obs_spec['states'] = {'names': list(critic_net_cfg.inputs.keys()), 'concat': not critic_net_cfg.name == "complex_net", 'space_name': 'state_space'}
-        
-        vecenv.register('RLGPU', lambda config_name, num_actors, **kwargs: ComplexObsRLGPUEnv(config_name, num_actors, obs_spec, **kwargs))
-    else:
+            obs_spec["states"] = {
+                "names": list(critic_net_cfg.inputs.keys()),
+                "concat": not critic_net_cfg.name == "complex_net",
+                "space_name": "state_space",
+            }
 
-        vecenv.register('RLGPU', lambda config_name, num_actors, **kwargs: RLGPUEnv(config_name, num_actors, **kwargs))
+        vecenv.register(
+            "RLGPU",
+            lambda config_name, num_actors, **kwargs: ComplexObsRLGPUEnv(
+                config_name, num_actors, obs_spec, **kwargs
+            ),
+        )
+    else:
+        vecenv.register(
+            "RLGPU",
+            lambda config_name, num_actors, **kwargs: RLGPUEnv(
+                config_name, num_actors, **kwargs
+            ),
+        )
 
     rlg_config_dict = omegaconf_to_dict(cfg.train)
     rlg_config_dict = preprocess_train_config(cfg, rlg_config_dict)
@@ -216,38 +251,86 @@ def launch_rlg_hydra(cfg: DictConfig):
     def build_runner(algo_observer):
         runner = Runner(algo_observer)
 
+        runner.algo_factory.register_builder(
+            "amp_continuous", lambda **kwargs: amp_continuous.AMPAgent(**kwargs)
+        )
+        runner.algo_factory.register_builder(
+            "base_ac", lambda **kwargs: a2c_continuous.A2CAgent(**kwargs)
+        )
+        runner.algo_factory.register_builder(
+            "pixel_ac", lambda **kwargs: handwirte_agent.A2CPixelAgent(**kwargs)
+        )
+        runner.algo_factory.register_builder(
+            "common_ac", lambda **kwargs: common_agent.CommonAgent(**kwargs)
+        )
+        runner.algo_factory.register_builder(
+            "sea_ac", lambda **kwargs: sea_agent.A2CAgent(**kwargs)
+        )
+        runner.algo_factory.register_builder(
+            "rma_ac", lambda **kwargs: rma_agent.A2CAgent(**kwargs)
+        )
+        runner.algo_factory.register_builder(
+            "waq_ac", lambda **kwargs: waq_agent.A2CAgent(**kwargs)
+        )
 
-        runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : amp_continuous.AMPAgent(**kwargs))
-        runner.algo_factory.register_builder('base_ac', lambda **kwargs : a2c_continuous.A2CAgent(**kwargs))
-        runner.algo_factory.register_builder('pixel_ac', lambda **kwargs : handwirte_agent.A2CPixelAgent(**kwargs))
-        runner.algo_factory.register_builder('common_ac', lambda **kwargs : common_agent.CommonAgent(**kwargs))
-        runner.algo_factory.register_builder('sea_ac', lambda **kwargs : sea_agent.A2CAgent(**kwargs))
-        runner.algo_factory.register_builder('rma_ac', lambda **kwargs : rma_agent.A2CAgent(**kwargs))
-        runner.algo_factory.register_builder('waq_ac', lambda **kwargs : waq_agent.A2CAgent(**kwargs))
-
-
-        runner.player_factory.register_builder('amp_continuous', lambda **kwargs : amp_players.AMPPlayerContinuous(**kwargs))
-        runner.player_factory.register_builder('pixel_ac', lambda **kwargs : handwrite_player.PpoPixelPlayerContinuous(**kwargs))
-        runner.player_factory.register_builder('common_ac', lambda **kwargs : common_player.CommonPlayer(**kwargs))
+        runner.player_factory.register_builder(
+            "amp_continuous", lambda **kwargs: amp_players.AMPPlayerContinuous(**kwargs)
+        )
+        runner.player_factory.register_builder(
+            "pixel_ac",
+            lambda **kwargs: handwrite_player.PpoPixelPlayerContinuous(**kwargs),
+        )
+        runner.player_factory.register_builder(
+            "common_ac", lambda **kwargs: common_player.CommonPlayer(**kwargs)
+        )
 
         # runner.player_factory.register_builder('real_ac', lambda **kwargs : state_player.Player(**kwargs))
-        runner.player_factory.register_builder('base_ac', lambda **kwargs : state_player.Player(**kwargs))
-        runner.player_factory.register_builder('waq_ac', lambda **kwargs : waq_player.Player(**kwargs))
+        runner.player_factory.register_builder(
+            "base_ac", lambda **kwargs: state_player.Player(**kwargs)
+        )
+        runner.player_factory.register_builder(
+            "waq_ac", lambda **kwargs: waq_player.Player(**kwargs)
+        )
 
-        
-        model_builder.register_model('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))
-        model_builder.register_model('continuous_sea', lambda network, **kwargs : sea_models.ModelSEAContinuous(network))
-        model_builder.register_model('continuous_rma', lambda network, **kwargs : rma_models.ModelRMA(network))
-        model_builder.register_model('continuous_waq', lambda network, **kwargs : waq_models.ModelContinuous(network))
+        model_builder.register_model(
+            "continuous_amp",
+            lambda network, **kwargs: amp_models.ModelAMPContinuous(network),
+        )
+        model_builder.register_model(
+            "continuous_sea",
+            lambda network, **kwargs: sea_models.ModelSEAContinuous(network),
+        )
+        model_builder.register_model(
+            "continuous_rma", lambda network, **kwargs: rma_models.ModelRMA(network)
+        )
+        model_builder.register_model(
+            "continuous_waq",
+            lambda network, **kwargs: waq_models.ModelContinuous(network),
+        )
 
-
-        model_builder.register_network('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
-        model_builder.register_network('actor_critic_pixel', lambda **kwargs : handwrite_network_builder.PixelA2CBuilder())
-        model_builder.register_network('actor_critic_history', lambda **kwargs : history_network_builder.HisA2CBuilder())
-        model_builder.register_network('actor_critic_state', lambda **kwargs : state_network_builder.A2CBuilder())
-        model_builder.register_network('actor_critic_sea', lambda **kwargs : sea_network_builder.A2CBuilder())
-        model_builder.register_network('actor_critic_rma', lambda **kwargs : rma_network_builder.A2CBuilder())
-        model_builder.register_network('actor_critic_waq', lambda **kwargs : waq_network_builder.A2CBuilder())
+        model_builder.register_network(
+            "amp", lambda **kwargs: amp_network_builder.AMPBuilder()
+        )
+        model_builder.register_network(
+            "actor_critic_pixel",
+            lambda **kwargs: handwrite_network_builder.PixelA2CBuilder(),
+        )
+        model_builder.register_network(
+            "actor_critic_history",
+            lambda **kwargs: history_network_builder.HisA2CBuilder(),
+        )
+        model_builder.register_network(
+            "actor_critic_state", lambda **kwargs: state_network_builder.A2CBuilder()
+        )
+        model_builder.register_network(
+            "actor_critic_sea", lambda **kwargs: sea_network_builder.A2CBuilder()
+        )
+        model_builder.register_network(
+            "actor_critic_rma", lambda **kwargs: rma_network_builder.A2CBuilder()
+        )
+        model_builder.register_network(
+            "actor_critic_waq", lambda **kwargs: waq_network_builder.A2CBuilder()
+        )
 
         return runner
 
@@ -259,19 +342,24 @@ def launch_rlg_hydra(cfg: DictConfig):
 
     # dump config dict
     if not cfg.test:
-        experiment_dir = os.path.join('runs', cfg.train.params.config.name + 
-        '_{date:%d-%H-%M-%S}'.format(date=datetime.now()))
+        experiment_dir = os.path.join(
+            "runs",
+            cfg.train.params.config.name
+            + "_{date:%d-%H-%M-%S}".format(date=datetime.now()),
+        )
 
         os.makedirs(experiment_dir, exist_ok=True)
-        with open(os.path.join(experiment_dir, 'config.yaml'), 'w') as f:
+        with open(os.path.join(experiment_dir, "config.yaml"), "w") as f:
             f.write(OmegaConf.to_yaml(cfg))
 
-    runner.run({
-        'train': not cfg.test,
-        'play': cfg.test,
-        'checkpoint': cfg.checkpoint,
-        'sigma': cfg.sigma if cfg.sigma != '' else None
-    })
+    runner.run(
+        {
+            "train": not cfg.test,
+            "play": cfg.test,
+            "checkpoint": cfg.checkpoint,
+            "sigma": cfg.sigma if cfg.sigma != "" else None,
+        }
+    )
 
 
 if __name__ == "__main__":
