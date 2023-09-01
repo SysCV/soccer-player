@@ -55,7 +55,7 @@ env:
     num_bins_x: 1 # 20
     linear_y: [-0.5, 0.5]   # min max [m/s]
     num_bins_y: 1 # 20
-    yaw: [-1.0, 1.0]          # min max [rad/s]
+    yaw: [-2.0, 2.0]          # min max [rad/s]
     num_bins_yaw: 1 # 5
 
   control:

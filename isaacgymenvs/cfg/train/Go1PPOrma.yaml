@@ -43,7 +43,7 @@ params:
         name: None
 
     privilige:
-      units: [32, 16, 8]
+      units: [32, 32, 20]
       layer_norm: True
       activation: elu
       d2rl: False

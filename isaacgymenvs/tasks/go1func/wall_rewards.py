@@ -28,25 +28,38 @@ class RewardTerms:
         )
         return rew_have_speed
 
-    def _reward_ball_direction_guidance(self):
+    def _reward_ball_direction_guidance_dog(self):
         # reward for ball speed align with ball-goal vector
-        pball_goal = self.env.goal_pos[:, :2] - self.env.ball_pos[:, :2]
         pball_robot = self.env.base_pos[:, :2] - self.env.ball_pos[:, :2]
-
-        angle_diff_goal = torch.atan2(
-            self.env.ball_lin_vel_xy_world[:, 1],
-            self.env.ball_lin_vel_xy_world[:, 0],
-        ) - torch.atan2(pball_goal[:, 1], pball_goal[:, 0])
-        angle_diff_in_pi_goal = torch.pow(wrap_to_pi(angle_diff_goal), 2)
 
         angle_diff_robot = torch.atan2(
             self.env.ball_lin_vel_xy_world[:, 1],
             self.env.ball_lin_vel_xy_world[:, 0],
         ) - torch.atan2(pball_robot[:, 1], pball_robot[:, 0])
         angle_diff_in_pi_robot = torch.pow(wrap_to_pi(angle_diff_robot), 2)
-        rew_ball_speed_guidance = torch.exp(
-            -1 * torch.minimum(angle_diff_in_pi_robot, angle_diff_in_pi_goal)
+        angle_diff_in_pi_robot = (
+            self.env.is_back.to(torch.float32) * angle_diff_in_pi_robot
         )
+        rew_ball_speed_guidance = torch.exp(-1 * angle_diff_in_pi_robot)
+
+        # print("shape of rew_ball_speed_guidance", rew_ball_speed_guidance)
+        return rew_ball_speed_guidance
+
+    def _reward_ball_direction_guidance_goal(self):
+        # reward for ball speed align with ball-goal vector
+        pball_goal = self.env.goal_pos[:, :2] - self.env.ball_pos[:, :2]
+
+        angle_diff_goal = torch.atan2(
+            self.env.ball_lin_vel_xy_world[:, 1],
+            self.env.ball_lin_vel_xy_world[:, 0],
+        ) - torch.atan2(pball_goal[:, 1], pball_goal[:, 0])
+
+        angle_diff_in_pi_goal = torch.pow(wrap_to_pi(angle_diff_goal), 2)
+        angle_diff_in_pi_goal = (
+            1.0 - self.env.is_back.to(torch.float32)
+        ) * angle_diff_in_pi_goal
+
+        rew_ball_speed_guidance = torch.exp(-1 * angle_diff_in_pi_goal)
 
         # print("shape of rew_ball_speed_guidance", rew_ball_speed_guidance)
         return rew_ball_speed_guidance
@@ -67,26 +80,55 @@ class RewardTerms:
         )
         base_heading_world = quat_rotate(self.env.base_quat, robot_heading)
         base_to_ball_world = self.env.ball_pos - self.env.base_pos
-        base_heading_world_xy = base_heading_world[:, :2]
-        base_to_ball_world_xy = base_to_ball_world[:, :2]
-        base_heading_world_xy = base_heading_world_xy / torch.norm(
-            base_heading_world_xy, dim=1, keepdim=True
+        base_heading_world_norm = base_heading_world / torch.norm(
+            base_heading_world, dim=1, keepdim=True
         )
-        base_to_ball_world_xy = base_to_ball_world_xy / torch.norm(
-            base_to_ball_world_xy, dim=1, keepdim=True
+        base_to_ball_world_norm = base_to_ball_world / torch.norm(
+            base_to_ball_world, dim=1, keepdim=True
         )
-        dot_product = torch.sum(base_heading_world_xy * base_to_ball_world_xy, dim=1)
-        heading_reward = torch.exp(-1 * (1 - dot_product))
+        dot_product = torch.sum(
+            base_heading_world_norm * base_to_ball_world_norm, dim=1
+        )
+        error = torch.clamp_min(
+            (1 - dot_product) - self.env.reward_params["dog_heading_ball"]["clip_min"],
+            0.0,
+        )
+        heading_reward = torch.exp(-1 * error)
+        return heading_reward
+
+    def _reward_dog_heading_goal(self):
+        robot_heading = torch.tensor(
+            [[1.0, 0.0, 0.0]] * self.env.base_pos.size(0),
+            device=self.env.root_states.device,
+        )
+        base_heading_world = quat_rotate(self.env.base_quat, robot_heading)
+        base_to_goal_world = self.env.goal_pos - self.env.base_pos
+        base_heading_world_norm = base_heading_world / torch.norm(
+            base_heading_world, dim=1, keepdim=True
+        )
+        base_to_goal_world_norm = base_to_goal_world / torch.norm(
+            base_to_goal_world, dim=1, keepdim=True
+        )
+        dot_product = torch.sum(
+            base_heading_world_norm * base_to_goal_world_norm, dim=1
+        )
+        error = torch.clamp_min(
+            (1 - dot_product) - self.env.reward_params["dog_heading_goal"]["clip_min"],
+            0.0,
+        )
+        heading_reward = torch.exp(-1 * error)
         return heading_reward
 
     def _reward_ball_dog_dis(self):
         ball_dog_distance_error = torch.sum(
             torch.square(self.env.ball_pos - self.env.base_pos), dim=1
         )
-        ball_dog_distance_error = torch.clamp_min(
-            ball_dog_distance_error, self.env.reward_params["ball_dog_dis"]["clip_min"]
-        )
-        rew_ball_dog_distance = torch.exp(
+
+        ball_dog_distance_error = ball_dog_distance_error
+        # ball_dog_distance_error = torch.clamp_min(
+        #     ball_dog_distance_error, self.env.reward_params["ball_dog_dis"]["clip_min"]
+        # )
+        rew_ball_dog_distance = (self.env.is_back.to(torch.float32)) * torch.exp(
             -1
             / self.env.reward_params["ball_dog_dis"]["sigma"]
             * ball_dog_distance_error
@@ -98,7 +140,9 @@ class RewardTerms:
             torch.square(self.env.ball_pos - self.env.goal_pos), dim=1
         )
 
-        rew_distance = torch.exp(
+        ball_goal_distance_error = ball_goal_distance_error
+
+        rew_distance = (1.0 - self.env.is_back.to(torch.float32)) * torch.exp(
             -1
             / self.env.reward_params["ball_goal_dis"]["sigma"]
             * ball_goal_distance_error

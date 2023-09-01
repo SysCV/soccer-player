@@ -66,16 +66,17 @@ env:
     robot_x_range: [-1.0, 1.5] # [m]
     ball_x_range: [-1.0, 3.5] # [m]
     ball_y_range: [-2, 2] # [m]
-    valid_catch_range: 0.4 # [m]
+    valid_catch_range: 0.35 # [m]
     valid_hit_wall_range: 0.12 # [m]
+    min_speed: 0.3 # [m/s]
 
   clipObservations: 5.0
   clipActions: 1.0
 
   plane:
-    staticFriction: 0.8 # [-]
+    staticFriction: 0.6 # [-]
     dynamicFriction: 0.6 # [-]
-    restitution: 0.9 # [-]
+    restitution: 0.4 # [-]
 
   baseInitState:
     pos: [0.0, 0.0, 0.33] # x,y,z [m]
@@ -92,10 +93,10 @@ env:
     randomPosRange: [0.0, 0.0, 0.0]
 
   ballInitState:
-    pos: [0.35, 0.0, 0.13] # x,y,z [m]
-    randomPosRange: [0.0, 0.5, 0.0]
+    pos: [0.30, 0.0, 0.11] # x,y,z [m]
+    randomPosRange: [0.1, 0.5, 0.0]
     # ballInitSpeed: -1.0 # [m/s]
-    mass: 0.35 # [kg]
+    mass: 0.4 # [kg]
 
   control:
     # PD Drive parameters:
@@ -127,16 +128,18 @@ env:
     sigma_rew_neg: 0.02 # is important!!
 
     rewardScales:
-      ball_direction_guidance: 0.1
+      ball_direction_guidance_dog: 0.5
+      ball_direction_guidance_goal: 0.5
       ball_speed_norm: 1.0
-      dog_heading_ball: 0.1 # once been 1/200
+      dog_heading_ball: 0.5 # once been 1/200
+      dog_heading_goal: 0.5
       ball_dog_dis: 1.0
-      ball_goal_dis: 0.5
+      ball_goal_dis: 1.0
       robot_y_guidance: 0.1
 
       # sparse reward need times episode length 20
-      hit_wall_and_switch: 20.0
-      catch_and_switch: 80.0
+      hit_wall_and_switch: 40.0
+      catch_and_switch: 40.0
 
       collision: -5.0
       orientation: -5.0
@@ -165,8 +168,12 @@ env:
       ball_speed_norm:
         sigma: 9.0 # 3 ** 2
 
+      dog_heading_ball:
+        clip_min: 0.5
+      dog_heading_goal:
+        clip_min: 0.5
+
       ball_dog_dis:
-        clip_min: 0.2
         sigma: 0.25
       ball_goal_dis:
         sigma: 0.25
@@ -175,7 +182,7 @@ env:
       hit_wall_and_switch:
         success_bonus_scale: 4.0
         hit_times_penalty: 1.0
-        valid_success_range: 0.18 # should be greater than terminateCondition.valid_hit_wall_range
+        valid_success_range: 0.20 # should be greater than terminateCondition.valid_hit_wall_range
 
       tracking_contacts_shaped_force:
         sigma: 100.

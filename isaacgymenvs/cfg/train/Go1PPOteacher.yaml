@@ -43,7 +43,7 @@ params:
         name: None
 
     privilige:
-      units: [8]
+      units: [20]
       activation: elu
       d2rl: False
 

@@ -63,8 +63,9 @@ env:
   clipActions: 1.0
 
   plane:
-    staticFriction: 0.0 # [-]
+    staticFriction: 0.0 # [-] # because we can't change the friction of the robot, and the friction of the contact pair is the mean of the two
     dynamicFriction: 0.0 # [-]
+    
     restitution: 0.0 # [-]
 
   baseInitState:
@@ -74,7 +75,7 @@ env:
     vAngular: [0.0, 0.0, 0.0] # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
-    linear_x: [-2.0, 2.0] # min max [m/s]
+    linear_x: [-3.0, 3.0] # min max [m/s]
     linear_x_init: [-1.0, 1.0] # min max [m/s]
     num_bins_x: 21 # 20
 
@@ -82,7 +83,7 @@ env:
     linear_y_init: [-0.6, 0.6] # min max [m/s]
     num_bins_y: 1 # 20
 
-    yaw: [-2.0, 2.0] # min max [rad/s]
+    yaw: [-4.0, 4.0] # min max [rad/s]
     yaw_init: [-1.0, 1.0] # min max [rad/s]
     num_bins_yaw: 21 # 5
 
@@ -98,12 +99,12 @@ env:
   random_params:
     stiffness:
       enable: true
-      range_low: 18.
-      range_high: 22.
+      range_low: 19.
+      range_high: 21.
     damping:
       enable: true
-      range_low: 0.4
-      range_high: 0.6
+      range_low: 0.45
+      range_high: 0.55
     friction:
       enable: false
       range_low: 0.1
@@ -111,11 +112,11 @@ env:
     restitution:
       enable: true
       range_low: 0.0
-      range_high: 1.00
+      range_high: 0.9
     com:
       enable: true
-      range_low: -0.1
-      range_high: 0.1
+      range_low: -0.13
+      range_high: 0.13
     payload:
       enable: true
       range_low: -1.0
@@ -173,6 +174,7 @@ env:
       # walk this way, this replace the feet air time
       tracking_contacts_shaped_force: 4.0
       tracking_contacts_shaped_vel: 4.0
+      raibert_heuristic: -10.0
 
     rewardParams:
       tracking_lin_vel:
@@ -190,7 +192,7 @@ env:
 
   learn:
     # normalization
-    linearVelocityScale: 0.5
+    linearVelocityScale: 0.3
     angularVelocityScale: 0.25
     dofPositionScale: 1.0
     dofVelocityScale: 0.05

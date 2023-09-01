@@ -1,10 +1,10 @@
-train_args=("Go1PPO" "Go1PPOwaq" "Go1PPOsea")
+train_args=("Go1PPO" "Go1PPOrnn" "Go1PPOhistory" "Go1PPOsea" "Go1PPOrma"  "Go1PPOteacher" "Go1PPOwaq" "Go1PPOteacher")
 # train_args=("Go1PPO" "Go1PPOrnn" "Go1PPOhistory" "Go1PPOsea" "Go1PPOrma"  "Go1PPOteacher" "Go1PPOwaq" "Go1PPOteacher")
-seeds=(42 2 17 13)
+seeds=(42 17 13) #) 2 17 13)
 
 for seed in "${seeds[@]}"; do
     for train_arg in "${train_args[@]}"; do
-        python train.py task=Go1 train="$train_arg" wandb_activate=true capture_video=true experiment="$train_arg" seed="$seed" max_iterations=3000 wandb_group="8-28-ramdom-for-deploy"
+        python train.py task=Go1 train="$train_arg" wandb_activate=true capture_video=true experiment="$train_arg" seed="$seed" max_iterations=3000 wandb_group="8-30-ramdom-for-deploy"
     done
 done
 

@@ -383,13 +383,16 @@ class Go1(VecTask):
         self.foot_velocities = self.rigid_body_state.view(
             self.num_envs, self.num_bodies, 13
         )[:, self.feet_indices, 7:10]
+        self.foot_positions = self.rigid_body_state.view(
+            self.num_envs, self.num_bodies, 13
+        )[:, self.feet_indices, 0:3]
 
         self.commands = torch.zeros(
             self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False
         )
-        self.commands_y = self.commands.view(self.num_envs, 3)[..., 1]
-        self.commands_x = self.commands.view(self.num_envs, 3)[..., 0]
-        self.commands_yaw = self.commands.view(self.num_envs, 3)[..., 2]
+        # self.commands_y = self.commands.view(self.num_envs, 3)[..., 1]
+        # self.commands_x = self.commands.view(self.num_envs, 3)[..., 0]
+        # self.commands_yaw = self.commands.view(self.num_envs, 3)[..., 2]
         self.default_dof_pos = torch.zeros_like(
             self.dof_pos, dtype=torch.float, device=self.device, requires_grad=False
         )
@@ -993,6 +996,14 @@ class Go1(VecTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_dof_force_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
+
+        # rigid body state need additional processing
+        self.foot_velocities = self.rigid_body_state.view(
+            self.num_envs, self.num_bodies, 13
+        )[:, self.feet_indices, 7:10]
+        self.foot_positions = self.rigid_body_state.view(
+            self.num_envs, self.num_bodies, 13
+        )[:, self.feet_indices, 0:3]
 
         self.base_pos = self.root_states[:, :3]
         self.base_quat = self.root_states[:, 3:7]

@@ -342,12 +342,10 @@ class Go1WallKicker(VecTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         # create some wrapper tensors for different slices
-        self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[
-            : self.num_envs * (self.num_bodies + 3), :
-        ]
-        self.base_body_state = self.rigid_body_state.view(
-            self.num_envs, (self.num_bodies + 3), 13
-        )[:, self.base_index, 0:8]
+        self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
+        # self.base_body_state = self.rigid_body_state.view(
+        #     self.num_envs, (self.num_bodies + 3), 13
+        # )[:, self.base_index, 0:8]
         self.foot_velocities = self.rigid_body_state.view(
             self.num_envs, (self.num_bodies + 3), 13
         )[:, self.feet_indices, 7:10]
@@ -1057,7 +1055,13 @@ class Go1WallKicker(VecTask):
         self.gym.refresh_dof_force_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
-        # raw data
+        # raw data, rigid body state need extra refresh
+        # self.base_body_state = self.rigid_body_state.view(
+        #     self.num_envs, (self.num_bodies + 3), 13
+        # )[:, self.base_index, 0:8]
+        self.foot_velocities = self.rigid_body_state.view(
+            self.num_envs, (self.num_bodies + 3), 13
+        )[:, self.feet_indices, 7:10]
 
         # state data
         self.base_quat = self.root_states[::4, 3:7]
@@ -1080,7 +1084,10 @@ class Go1WallKicker(VecTask):
             torch.norm(self.contact_forces[:, self.ball_index, :], dim=1) > 0.1
         )
         self.onground_length[is_onground] += 1
-        is_stable = ~(torch.any(self.root_states[1::4, 7:9] > 0.2, dim=1))
+        is_stable = ~(
+            torch.norm(self.root_states[1::4, 7:9], dim=1)
+            > self.cfg["env"]["terminateCondition"]["min_speed"]
+        )
         self.stable_length[is_stable] += 1
 
         self.ball_near_wall_now = (
@@ -1145,7 +1152,9 @@ class Go1WallKicker(VecTask):
             torch.norm(self.contact_forces[:, self.knee_indices, :], dim=2) > 1.0, dim=1
         )
 
-        reset = reset | (self.ball_pos[:, 0] - self.goal_pos[:, 0] > 0.1) # go behind the wall is not allowed
+        reset = reset | (
+            self.ball_pos[:, 0] - self.goal_pos[:, 0] > 0.1
+        )  # go behind the wall is not allowed
         reset = (
             reset
             | (self.base_pos[:, 0] < self.robot_x_range[0])
