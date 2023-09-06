@@ -28,7 +28,7 @@ env:
     # contact_state: 4
 
   gait_condition:
-    # trotting [0.5,0,0] pacing [0,0,0.5]
+    # trotting [0.5,0,0] pacing [0,0,0.5] jumping [0,0,0]
     phases: 0.5
     offsets: 0.0
     bounds: 0.0

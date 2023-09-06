@@ -120,15 +120,11 @@ class Go1WallKicker(VecTask):
         # cam pic
         self.have_cam_window = self.cfg["env"]["cameraSensorPlt"]
         self.pixel_obs = self.cfg["env"]["pixel_observations"]["enable"]
-        self.state_obs = self.cfg["env"]["state_obs"]
         # print("pixel_obs:", self.pixel_obs)
         if self.have_cam_window:
             _, self.ax = plt.subplots()
             plt.axis("off")
         self.add_real_ball = self.cfg["task"]["target_ball"]
-
-        self.obs_history = self.cfg["env"]["obs_history"]
-        self.history_length = self.cfg["env"]["history_length"]
 
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
@@ -191,17 +187,32 @@ class Go1WallKicker(VecTask):
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
+        # state observation
         numObservations = 0
         # print(self.cfg["env"]["state_observations"])
         for v in self.cfg["env"]["state_observations"].values():
             numObservations += v
         self.cfg["env"]["numObservations"] = numObservations
 
+        # history
+        self.obs_history = self.cfg["env"]["obs_history"]
+        self.history_length = self.cfg["env"]["history_length"]
+
+        # priviledge
+        self.obs_privilige = self.cfg["env"]["obs_privilege"]
+        if self.obs_privilige:
+            privious_obs_dict = self.cfg["env"]["priviledgeStates"]
+            privious_obs_dim = 0
+            for val in privious_obs_dict.values():
+                privious_obs_dim += val
+            self.privilige_length = privious_obs_dim
+
         self.cfg["env"]["numActions"] = self.cfg["env"]["actions_num"]
 
         self.cam_range = self.cfg["env"]["pixel_observations"]["cam_range"]
         self.image_width = self.cfg["env"]["pixel_observations"]["width"]
         self.image_height = self.cfg["env"]["pixel_observations"]["height"]
+        self.head_cam_pose = self.cfg["env"]["pixel_observations"]["head_cam_pose"]
 
         fx = (self.image_width / 2) / math.tan(math.radians(self.cam_range / 2))
         fy = (self.image_height / 2) / math.tan(math.radians(self.cam_range / 2))
@@ -223,39 +234,33 @@ class Go1WallKicker(VecTask):
             force_render=force_render,
         )
 
+        obs_space_dict = {}
+        obs_space_dict["state_obs"] = spaces.Box(
+            np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf
+        )
+
         # rewrite obs space
         if self.pixel_obs:
-            self.obs_space = spaces.Dict(
-                {
-                    "state_obs": spaces.Box(
-                        np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf
-                    ),
-                    "pixel_obs": spaces.Box(
-                        low=0,
-                        high=255,
-                        shape=(self.image_height, self.image_width, 3),
-                        dtype=np.uint8,
-                    ),
-                }
+            obs_space_dict["pixel_obs"] = spaces.Box(
+                low=0,
+                high=255,
+                shape=(self.image_height, self.image_width, 3),
+                dtype=np.uint8,
             )
-        elif self.state_obs:
-            self.obs_space = spaces.Dict(
-                {
-                    "state_obs": spaces.Box(
-                        np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf
-                    )
-                }
-            )
-        elif self.obs_history:
-            obs_space_dict = {}
-            obs_space_dict["state_obs"] = spaces.Box(
-                np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf
-            )
+
+        if self.obs_history:
             obs_space_dict["state_history"] = spaces.Box(
                 np.ones(self.num_obs * self.history_length) * -np.Inf,
                 np.ones(self.num_obs * self.history_length) * np.Inf,
             )
-            self.obs_space = spaces.Dict(obs_space_dict)
+
+        if self.obs_privilige:
+            obs_space_dict["state_privilige"] = spaces.Box(
+                np.ones(self.privilige_length) * -np.Inf,
+                np.ones(self.privilige_length) * np.Inf,
+            )
+
+        self.obs_space = spaces.Dict(obs_space_dict)
 
         # other
         self.dt = self.sim_params.dt
@@ -371,6 +376,14 @@ class Go1WallKicker(VecTask):
             zero_obs[2] = -1  # default gravity
             self.history_per_begin = torch.tile(zero_obs, (self.history_length,))
             self.history_buffer = torch.tile(self.history_per_begin, (self.num_envs, 1))
+
+        if self.obs_privilige:
+            self.privilige_buffer = torch.zeros(
+                self.num_envs,
+                self.privilige_length,
+                device=self.device,
+                dtype=torch.float,
+            )
 
     def create_self_buffers(self):
         # initialize some data used later on
@@ -519,6 +532,7 @@ class Go1WallKicker(VecTask):
         self.goal_qstar_element = torch.diag(
             torch.tensor([0.01**2, 0.15**2, 0.15**2, -1], device=self.device)
         )
+        self.proot_cam_element = torch.tensor(self.head_cam_pose, device=self.device)
 
     def create_sim(self):
         self.up_axis_idx = 2  # index of up axis: Y=1, Z=2
@@ -762,34 +776,7 @@ class Go1WallKicker(VecTask):
                 )
 
             if self.pixel_obs or self.have_cam_window:
-                camera_properties = gymapi.CameraProperties()
-                camera_properties.horizontal_fov = self.cam_range
-                camera_properties.enable_tensors = True
-                camera_properties.width = self.image_width
-                camera_properties.height = self.image_height
-
-                cam_handle = self.gym.create_camera_sensor(env_ptr, camera_properties)
-                camera_offset = gymapi.Vec3(0.3, 0, 0)
-                # camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.deg2rad(20))
-                body_handle = self.gym.get_actor_rigid_body_handle(
-                    env_ptr, a1_handle, 0
-                )
-
-                self.gym.attach_camera_to_body(
-                    cam_handle,
-                    env_ptr,
-                    body_handle,
-                    gymapi.Transform(camera_offset),
-                    gymapi.FOLLOW_TRANSFORM,
-                )
-                self.camera_handles.append(cam_handle)
-                cam_tensor = self.gym.get_camera_image_gpu_tensor(
-                    self.sim, env_ptr, cam_handle, gymapi.IMAGE_COLOR
-                )
-
-                # wrap camera tensor in a pytorch tensor
-                torch_cam_tensor = gymtorch.wrap_tensor(cam_tensor)
-                self.camera_tensor_list.append(torch_cam_tensor)
+                self.add_cam(env_ptr, a1_handle)
 
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(
@@ -815,6 +802,38 @@ class Go1WallKicker(VecTask):
         self.goal_index = self.gym.find_actor_rigid_body_handle(
             self.envs[0], self.goal_handles[0], "goal"
         )
+
+    def add_cam(self, env_ptr, a1_handle):
+        camera_properties = gymapi.CameraProperties()
+        camera_properties.horizontal_fov = self.cam_range
+        camera_properties.enable_tensors = True
+        camera_properties.width = self.image_width
+        camera_properties.height = self.image_height
+
+        cam_handle = self.gym.create_camera_sensor(env_ptr, camera_properties)
+        camera_offset = gymapi.Vec3(
+            self.head_cam_pose[0], self.head_cam_pose[1], self.head_cam_pose[2]
+        )
+        # camera_rotation = gymapi.Quat.from_axis_angle(
+        #     gymapi.Vec3(0, 1, 0), torch.pi / 2
+        # )
+        body_handle = self.gym.get_actor_rigid_body_handle(env_ptr, a1_handle, 0)
+
+        self.gym.attach_camera_to_body(
+            cam_handle,
+            env_ptr,
+            body_handle,
+            gymapi.Transform(camera_offset),  # , camera_rotation),
+            gymapi.FOLLOW_TRANSFORM,
+        )
+        self.camera_handles.append(cam_handle)
+        cam_tensor = self.gym.get_camera_image_gpu_tensor(
+            self.sim, env_ptr, cam_handle, gymapi.IMAGE_COLOR
+        )
+
+        # wrap camera tensor in a pytorch tensor
+        torch_cam_tensor = gymtorch.wrap_tensor(cam_tensor)
+        self.camera_tensor_list.append(torch_cam_tensor)
 
     def pre_physics_step(self, actions):
         self.last_last_targets = self.last_targets.clone()
@@ -885,32 +904,26 @@ class Go1WallKicker(VecTask):
         self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
         self.extras["is_firsts"] = self.is_first_buf.to(self.rl_device)
 
-        if self.pixel_obs:
-            self.obs_dict["obs"] = {
-                "state_obs": torch.clamp(
-                    self.obs_buf, -self.clip_obs, self.clip_obs
-                ).to(self.rl_device),
-                "pixel_obs": self.camera_tensor_imgs_buf.to(self.rl_device),
-            }
-        elif self.state_obs:
-            self.obs_dict["obs"] = {
-                "state_obs": torch.clamp(
-                    self.obs_buf, -self.clip_obs, self.clip_obs
-                ).to(self.rl_device)
-            }
-        elif self.obs_history:
-            self.obs_dict["obs"] = {
-                "state_obs": torch.clamp(
-                    self.obs_buf, -self.clip_obs, self.clip_obs
-                ).to(self.rl_device),
-                "state_history": torch.clamp(
-                    self.history_buffer, -self.clip_obs, self.clip_obs
-                ).to(self.rl_device),
-            }
-        else:
-            self.obs_dict["obs"] = torch.clamp(
-                self.obs_buf, -self.clip_obs, self.clip_obs
+        self.obs_dict["obs"] = {
+            "state_obs": torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(
+                self.rl_device
+            )
+        }
+
+        if self.obs_history:
+            self.obs_dict["obs"]["state_history"] = torch.clamp(
+                self.history_buffer, -self.clip_obs, self.clip_obs
             ).to(self.rl_device)
+
+        if self.obs_privilige:
+            self.obs_dict["obs"]["state_privilige"] = self.privilige_buffer.to(
+                self.rl_device
+            )
+
+        if self.pixel_obs:
+            self.obs_dict["obs"]["pixel_obs"] = self.camera_tensor_imgs_buf.to(
+                self.rl_device
+            )
 
         # for i in self.obs_dict["obs"].values():
         #     print("i th env obs:", i.shape, i.dtype)
@@ -953,6 +966,13 @@ class Go1WallKicker(VecTask):
 
         self.refresh_self_buffers()
         self._step_contact_targets()
+
+        # print("=====================================================")
+        # print("event: ", self.is_back)
+        # print("near wall: ", self.ball_near_wall_now)
+        # print("near robot: ", self.ball_near_robot_now)
+        # print("wall distance: ", torch.abs(self.ball_pos[:, 0] - self.wall_init_pos[0]))
+        # print("rebound times: ", self.rebound_times)
 
         self.compute_observations()
         self.compute_reset()
@@ -1249,25 +1269,44 @@ class Go1WallKicker(VecTask):
         if "ball_states_v" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_v)
 
-        if "pixel_bbox_ball" in self.cfg["env"]["state_observations"]:
+        if (
+            "pixel_bbox_ball" in self.cfg["env"]["state_observations"]
+            or self.have_cam_window
+        ):
             self.bboxes_ball = quadric_utils.calc_projected_bbox(
-                self.ball_qstar_element, base_quat, base_pose, self.K_torch, pw_ball
+                self.ball_qstar_element,
+                base_quat,
+                base_pose,
+                self.K_torch,
+                pw_ball,
+                self.proot_cam_element,
+                # facing_down=True
             )
 
             pixel_bbox_ball = quadric_utils.convert_bbox_to_01(
                 self.bboxes_ball, self.image_width, self.image_height
             )
 
-            cat_list.append(pixel_bbox_ball)
+            if "pixel_bbox_ball" in self.cfg["env"]["state_observations"]:
+                cat_list.append(pixel_bbox_ball)
 
-        if "pixel_bbox_goal" in self.cfg["env"]["state_observations"]:
+        if (
+            "pixel_bbox_goal" in self.cfg["env"]["state_observations"]
+            or self.have_cam_window
+        ):
             self.bboxes_goal = quadric_utils.calc_projected_bbox(
-                self.goal_qstar_element, base_quat, base_pose, self.K_torch, pw_goal
+                self.goal_qstar_element,
+                base_quat,
+                base_pose,
+                self.K_torch,
+                pw_goal,
+                self.proot_cam_element,
             )
             pixel_bbox_goal = quadric_utils.convert_bbox_to_01(
                 self.bboxes_ball, self.image_width, self.image_height
             )
-            cat_list.append(pixel_bbox_goal)
+            if "pixel_bbox_ball" in self.cfg["env"]["state_observations"]:
+                cat_list.append(pixel_bbox_goal)
 
         if "goal_pose" in self.cfg["env"]["state_observations"]:
             cat_list.append(goal_p)
@@ -1279,23 +1318,7 @@ class Go1WallKicker(VecTask):
         if "ball_event" in self.cfg["env"]["state_observations"]:
             cat_list.append(self.is_back.unsqueeze(1).to(torch.float32))
 
-        # print(cat_list)
-
         obs = torch.cat(cat_list, dim=-1)
-
-        # obs = torch.cat((
-        #     base_lin_vel,
-        #     base_ang_vel,
-        #     projected_gravity,
-        #     commands_scaled,
-        #     dof_pos_scaled,
-        #     dof_vel * dof_vel_scale,
-        #     actions,
-        #     ball_states_p,
-        #     ball_states_v,
-        #     base_pose_privileged,
-        #     base_quat
-        # ), dim=-1)
 
         self.obs_buf[:] = obs
 
@@ -1303,6 +1326,25 @@ class Go1WallKicker(VecTask):
             self.history_buffer[:] = torch.cat(
                 (obs, self.history_buffer[:, self.num_obs :]), dim=1
             )
+
+        if self.obs_privilige:
+            priv_list = []
+            if "base_lin_vel" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(base_lin_vel)
+            if "base_ang_vel" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(base_ang_vel)
+            if "ball_states_v" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(ball_states_v)
+            if "goal_pose" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(goal_p)
+            if "base_pose" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(base_pose)
+            if "base_quat" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(base_quat)
+            if "ball_event" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.is_back.unsqueeze(1).to(torch.float32))
+
+            self.privilige_buffer[:] = torch.cat(priv_list, dim=-1)
 
     def _prepare_reward_function(self):
         """Prepares a list of reward functions, which will be called to compute the total reward.
@@ -1409,33 +1451,27 @@ class Go1WallKicker(VecTask):
         # self.compute_reset()
         # self.compute_reward(self.actions)
 
+        self.obs_dict["obs"] = {
+            "state_obs": torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(
+                self.rl_device
+            )
+        }
+
         if self.pixel_obs:
             self.compute_pixels()
-            self.obs_dict["obs"] = {
-                "state_obs": torch.clamp(
-                    self.obs_buf, -self.clip_obs, self.clip_obs
-                ).to(self.rl_device),
-                "pixel_obs": self.camera_tensor_imgs_buf.to(self.rl_device),
-            }
-        elif self.state_obs:
-            self.obs_dict["obs"] = {
-                "state_obs": torch.clamp(
-                    self.obs_buf, -self.clip_obs, self.clip_obs
-                ).to(self.rl_device)
-            }
-        elif self.obs_history:
-            self.obs_dict["obs"] = {
-                "state_obs": torch.clamp(
-                    self.obs_buf, -self.clip_obs, self.clip_obs
-                ).to(self.rl_device)
-            }
+            self.obs_dict["obs"]["pixel_obs"] = self.camera_tensor_imgs_buf.to(
+                self.rl_device
+            )
+
+        if self.obs_history:
             self.obs_dict["obs"]["state_history"] = torch.clamp(
                 self.history_buffer, -self.clip_obs, self.clip_obs
             ).to(self.rl_device)
-        else:
-            self.obs_dict["obs"] = torch.clamp(
-                self.obs_buf, -self.clip_obs, self.clip_obs
-            ).to(self.rl_device)
+
+        if self.obs_privilige:
+            self.obs_dict["obs"]["state_privilige"] = self.privilige_buffer.to(
+                self.rl_device
+            )
 
         # asymmetric actor-critic
         if self.num_states > 0:

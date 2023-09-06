@@ -93,7 +93,7 @@ class RewardTerms:
             (1 - dot_product) - self.env.reward_params["dog_heading_ball"]["clip_min"],
             0.0,
         )
-        heading_reward = torch.exp(-1 * error)
+        heading_reward = error
         return heading_reward
 
     def _reward_dog_heading_goal(self):
@@ -116,7 +116,7 @@ class RewardTerms:
             (1 - dot_product) - self.env.reward_params["dog_heading_goal"]["clip_min"],
             0.0,
         )
-        heading_reward = torch.exp(-1 * error)
+        heading_reward = error
         return heading_reward
 
     def _reward_ball_dog_dis(self):
@@ -176,8 +176,10 @@ class RewardTerms:
 
         reward_hit[bonus_index] += self.env.reward_params["hit_wall_and_switch"][
             "success_bonus_scale"
-        ] / (
-            1
+        ]
+
+        reward_hit /= (
+            1.0
             + self.env.reward_params["hit_wall_and_switch"]["hit_times_penalty"]
             * self.env.rebound_times[bonus_index]
         )

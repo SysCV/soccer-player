@@ -201,7 +201,7 @@ class Go1(VecTask):
             privious_obs_dim = 0
             for val in privious_obs_dict.values():
                 privious_obs_dim += val
-        self.privilige_length = privious_obs_dim
+            self.privilige_length = privious_obs_dim
 
         self.obs_history = self.cfg["env"]["obs_history"]
         self.history_length = self.cfg["env"]["history_length"]
@@ -779,8 +779,6 @@ class Go1(VecTask):
             self.obs_buf = self.dr_randomizations["observations"]["noise_lambda"](
                 self.obs_buf
             )
-
-        self.extras["time_outs"] = self.timeout_buf.to(self.rl_device)
 
         self.obs_dict["obs"] = {
             "state_obs": torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(

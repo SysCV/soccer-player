@@ -10,7 +10,7 @@ params:
     name: continuous_a2c_logstd
 
   network:
-    name: actor_critic # actor_critic # actor_critic_pixel
+    name: actor_critic_state # actor_critic # actor_critic_pixel
     separate: False
 
     space:
