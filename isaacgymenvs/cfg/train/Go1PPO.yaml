@@ -73,7 +73,7 @@ params:
 
     player:
       games_num: 50000
-      generate_offline_data: True
+      generate_offline_data: false
       offline_save_dir: "./offline_data/go1.pt"
       discount_factor: 0.99
       offline_data_length: 2000 #  50 * 20 * 2 = 2000

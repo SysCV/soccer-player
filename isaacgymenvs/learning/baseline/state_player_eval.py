@@ -236,6 +236,7 @@ class Player(BasePlayer):
                 linestyle="-",
                 label="Measured",
             )
+            # np.save("joint_positions.npy", joint_positions)
             axs[1].set_title("Joint Positions")
             axs[1].set_xlabel("Time (s)")
             axs[1].set_ylabel("Joint Position (rad)")

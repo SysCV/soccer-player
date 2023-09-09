@@ -118,7 +118,7 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning.baseline import state_network_builder
 
     #     from isaacgymenvs.learning.baseline import state_player
-    from isaacgymenvs.learning.baseline import state_player as state_player
+    from isaacgymenvs.learning.baseline import state_player_eval as state_player
 
     # _eval
 

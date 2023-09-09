@@ -93,6 +93,7 @@ class RewardTerms:
             (1 - dot_product) - self.env.reward_params["dog_heading_ball"]["clip_min"],
             0.0,
         )
+        # print("ball-heading-error", error)
         heading_reward = error
         return heading_reward
 
@@ -117,6 +118,7 @@ class RewardTerms:
             0.0,
         )
         heading_reward = error
+        # print("goal-heading-error", error)
         return heading_reward
 
     def _reward_ball_dog_dis(self):
@@ -181,7 +183,7 @@ class RewardTerms:
         reward_hit /= (
             1.0
             + self.env.reward_params["hit_wall_and_switch"]["hit_times_penalty"]
-            * self.env.rebound_times[bonus_index]
+            * self.env.rebound_times
         )
 
         self.env.is_back[reward_index] = True
@@ -200,6 +202,11 @@ class RewardTerms:
             device=self.env.ball_near_robot_now.device,
         )
         reward_catch[reward_index] = 1.0
+        reward_catch /= (
+            1.0
+            + self.env.reward_params["catch_and_switch"]["hit_times_penalty"]
+            * self.env.rebound_times
+        )
         self.env.rebound_times[reward_index] += 1
         return reward_catch
 
