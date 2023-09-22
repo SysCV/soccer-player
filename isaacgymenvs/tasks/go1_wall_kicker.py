@@ -189,7 +189,7 @@ class Go1WallKicker(VecTask):
 
         # state observation
         numObservations = 0
-        # print(self.cfg["env"]["state_observations"])
+        print(self.cfg["env"]["state_observations"])
         for v in self.cfg["env"]["state_observations"].values():
             numObservations += v
         self.cfg["env"]["numObservations"] = numObservations
@@ -203,6 +203,7 @@ class Go1WallKicker(VecTask):
         if self.obs_privilige:
             privious_obs_dict = self.cfg["env"]["priviledgeStates"]
             privious_obs_dim = 0
+            print("privious_obs_dict:", privious_obs_dict)
             for val in privious_obs_dict.values():
                 privious_obs_dim += val
             self.privilige_length = privious_obs_dim
@@ -1266,6 +1267,11 @@ class Go1WallKicker(VecTask):
 
         if "ball_states_p" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_p)
+        if "ball_2d_close" in self.cfg["env"]["state_observations"]:
+            ball_is_close = torch.norm(ball_states_p, dim=1) < 0.5
+            ball_close_2d = ball_states_p[:, 0:2]
+            ball_close_2d[~ball_is_close, :] = -1.0
+            cat_list.append(ball_close_2d)
         if "ball_states_v" in self.cfg["env"]["state_observations"]:
             cat_list.append(ball_states_v)
 
@@ -1324,7 +1330,7 @@ class Go1WallKicker(VecTask):
 
         if self.obs_history:
             self.history_buffer[:] = torch.cat(
-                (obs, self.history_buffer[:, self.num_obs :]), dim=1
+                (self.history_buffer[:, self.num_obs :], obs), dim=1
             )
 
         if self.obs_privilige:
@@ -1333,10 +1339,14 @@ class Go1WallKicker(VecTask):
                 priv_list.append(base_lin_vel)
             if "base_ang_vel" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(base_ang_vel)
+
+            if "ball_states_p" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(ball_states_p)
             if "ball_states_v" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(ball_states_v)
             if "goal_pose" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(goal_p)
+
             if "base_pose" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(base_pose)
             if "base_quat" in self.cfg["env"]["priviledgeStates"]:

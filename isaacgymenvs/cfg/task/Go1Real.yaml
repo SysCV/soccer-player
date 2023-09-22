@@ -4,13 +4,11 @@ name: Go1Real
 physics_engine: ${..physics_engine}
 
 env:
-  real_robot: false
   numEnvs: 1
-  envSpacing: 2.  # [m]
+  envSpacing: 2. # [m]
 
   obs_history: true
   history_length: 15
-
 
   action_lag_step: 0
 
@@ -19,7 +17,7 @@ env:
   obs_num:
     # base_v: 3
     # base_w: 3
-    gravity: 3 
+    gravity: 3
     command: 3
     dof_p: 12
     dof_v: 12
@@ -33,6 +31,12 @@ env:
     offsets: 0.0
     bounds: 0.0
     kappa: 0.07
+    duration: 0.5 # for stance phase
+    frequency: 3.0
+
+  make_sound_dataset: false
+  sound_dataset_dir: "./dataset/"
+
 
   act_num: 12
 
@@ -40,49 +44,49 @@ env:
   clipActions: 1.0
 
   plane:
-    staticFriction: 1.0  # [-]
-    dynamicFriction: 1.0  # [-]
-    restitution: 0.        # [-]
+    staticFriction: 1.0 # [-]
+    dynamicFriction: 1.0 # [-]
+    restitution: 0. # [-]
 
   baseInitState:
     pos: [0.0, 0.0, 0.30] # x,y,z [m]
     rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
-    vLinear: [0.0, 0.0, 0.0]  # x,y,z [m/s]
-    vAngular: [0.0, 0.0, 0.0]  # x,y,z [rad/s]
+    vLinear: [0.0, 0.0, 0.0] # x,y,z [m/s]
+    vAngular: [0.0, 0.0, 0.0] # x,y,z [rad/s]
 
   randomCommandVelocityRanges:
     linear_x: [-1.0, 1.0] # min max [m/s]
     num_bins_x: 1 # 20
-    linear_y: [-0.5, 0.5]   # min max [m/s]
+    linear_y: [-0.5, 0.5] # min max [m/s]
     num_bins_y: 1 # 20
-    yaw: [-2.0, 2.0]          # min max [rad/s]
+    yaw: [-2.0, 2.0] # min max [rad/s]
     num_bins_yaw: 1 # 5
 
   control:
     type: "pose_pd" # pose_pd / actuator_net
     # PD Drive parameters:
-    stiffness: 20.0  # [N*m/rad]
-    damping: 0.5     # [N*m*s/rad]
+    stiffness: 20.0 # [N*m/rad]
+    damping: 0.5 # [N*m*s/rad]
     actionScale: 0.5
     controlFrequencyInv: 1 # 60 Hz
     hipAddtionalScale: 0.5
     # todo: change to a1 param?
 
-  defaultJointAngles:  # = target angles when action = 0.0
-    FL_hip_joint: 0.1   # [rad]
-    RL_hip_joint: 0.1   # [rad]
-    FR_hip_joint: -0.1  # [rad]
-    RR_hip_joint: -0.1    # [rad]
+  defaultJointAngles: # = target angles when action = 0.0
+    FL_hip_joint: 0.1 # [rad]
+    RL_hip_joint: 0.1 # [rad]
+    FR_hip_joint: -0.1 # [rad]
+    RR_hip_joint: -0.1 # [rad]
 
-    FL_thigh_joint: 0.8     # [rad]
-    RL_thigh_joint: 1.    # [rad]
-    FR_thigh_joint: 0.8     # [rad]
-    RR_thigh_joint: 1.   # [rad]
+    FL_thigh_joint: 0.8 # [rad]
+    RL_thigh_joint: 1. # [rad]
+    FR_thigh_joint: 0.8 # [rad]
+    RR_thigh_joint: 1. # [rad]
 
-    FL_calf_joint: -1.5    # [rad]
-    RL_calf_joint: -1.5    # [rad]
-    FR_calf_joint: -1.5   # [rad]
-    RR_calf_joint: -1.5     # [rad]
+    FL_calf_joint: -1.5 # [rad]
+    RL_calf_joint: -1.5 # [rad]
+    FR_calf_joint: -1.5 # [rad]
+    RR_calf_joint: -1.5 # [rad]
 
   learn:
     # normalization

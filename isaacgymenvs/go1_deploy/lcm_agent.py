@@ -28,8 +28,8 @@ def class_to_dict(obj) -> dict:
     return result
 
 
-class LCMAgent():
-    def __init__(self, cfg, se, command_profile, device='cpu'):
+class LCMAgent:
+    def __init__(self, cfg, se, command_profile, device="cpu"):
         if not isinstance(cfg, dict):
             cfg = class_to_dict(cfg)
         self.cfg = cfg
@@ -46,14 +46,23 @@ class LCMAgent():
         self.num_commands = 3
         self.device = device
 
-
-
         joint_names = [
-            "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-            "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-            "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-            "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint", ]
-        self.default_dof_pos = np.array([self.cfg["env"]["defaultJointAngles"][name] for name in joint_names])
+            "FL_hip_joint",
+            "FL_thigh_joint",
+            "FL_calf_joint",
+            "FR_hip_joint",
+            "FR_thigh_joint",
+            "FR_calf_joint",
+            "RL_hip_joint",
+            "RL_thigh_joint",
+            "RL_calf_joint",
+            "RR_hip_joint",
+            "RR_thigh_joint",
+            "RR_calf_joint",
+        ]
+        self.default_dof_pos = np.array(
+            [self.cfg["env"]["defaultJointAngles"][name] for name in joint_names]
+        )
         self.default_dof_pos_scale = np.ones(12)
         self.default_dof_pos = self.default_dof_pos * self.default_dof_pos_scale
 
@@ -63,7 +72,6 @@ class LCMAgent():
             self.p_gains[i] = 20
             self.d_gains[i] = 0.5
             found = True
-
 
         print(f"p_gains: {self.p_gains}")
 
@@ -91,8 +99,10 @@ class LCMAgent():
         self.is_currently_probing = is_currently_probing
 
     def get_obs(self):
-        cmds, reset_timer = self.command_profile.get_command(self.timestep * self.dt, probe=self.is_currently_probing)
-        self.commands[:, :] = cmds[:self.num_commands]
+        cmds, reset_timer = self.command_profile.get_command(
+            self.timestep * self.dt, probe=self.is_currently_probing
+        )
+        self.commands[:, :] = cmds[: self.num_commands]
         if reset_timer:
             self.reset_gait_indices()
 
@@ -103,29 +113,38 @@ class LCMAgent():
         self.body_angular_vel = self.se.get_body_angular_vel()
         self.contact_state = self.se.get_contact_state()
 
-        ob = np.concatenate((self.gravity_vector.reshape(1, -1),
-                             self.commands,
-                             (self.dof_pos - self.default_dof_pos).reshape(1, -1),
-                             self.dof_vel.reshape(1, -1),
-                             self.actions.cpu().detach().numpy().reshape(1, -1)
-                             ), axis=1)
-        
-        if "observe_contact_states" in self.cfg["env"].keys() and self.cfg["env"]["observe_contact_states"]:
-            ob = np.concatenate((ob, self.contact_state.reshape(1, -1)), axis=-1)
+        ob = np.concatenate(
+            (
+                self.gravity_vector.reshape(1, -1),
+                self.commands,
+                (self.dof_pos - self.default_dof_pos).reshape(1, -1),
+                self.dof_vel.reshape(1, -1),
+                self.actions.cpu().detach().numpy().reshape(1, -1),
+            ),
+            axis=1,
+        )
 
+        if (
+            "observe_contact_states" in self.cfg["env"].keys()
+            and self.cfg["env"]["observe_contact_states"]
+        ):
+            ob = np.concatenate((ob, self.contact_state.reshape(1, -1)), axis=-1)
 
         return torch.tensor(ob, device=self.device).float()
 
     def get_privileged_observations(self):
-        return None
+        return self.se.get_rms()
 
     def publish_action(self, action, hard_reset=False):
-
         self.actions = action[0, :12]
         command_for_robot = pd_tau_targets_lcmt()
-        self.joint_pos_target = \
-            (action[0, :12].detach().cpu().numpy() * self.cfg["env"]["control"]["actionScale"]).flatten()
-        self.joint_pos_target[[0, 3, 6, 9]] *= self.cfg["env"]["control"]["hipAddtionalScale"]
+        self.joint_pos_target = (
+            action[0, :12].detach().cpu().numpy()
+            * self.cfg["env"]["control"]["actionScale"]
+        ).flatten()
+        self.joint_pos_target[[0, 3, 6, 9]] *= self.cfg["env"]["control"][
+            "hipAddtionalScale"
+        ]
         self.joint_pos_target = self.joint_pos_target
         self.joint_pos_target += self.default_dof_pos
         joint_pos_target = self.joint_pos_target[self.joint_idxs]
@@ -138,14 +157,15 @@ class LCMAgent():
         command_for_robot.kd = self.d_gains
         command_for_robot.tau_ff = np.zeros(12)
         command_for_robot.se_contactState = np.zeros(4)
-        command_for_robot.timestamp_us = int(time.time() * 10 ** 6)
+        command_for_robot.timestamp_us = int(time.time() * 10**6)
         command_for_robot.id = 0
 
         if hard_reset:
             command_for_robot.id = -1
 
-
-        self.torques = (self.joint_pos_target - self.dof_pos) * self.p_gains + (self.joint_vel_target - self.dof_vel) * self.d_gains
+        self.torques = (self.joint_pos_target - self.dof_pos) * self.p_gains + (
+            self.joint_vel_target - self.dof_vel
+        ) * self.d_gains
 
         lc.publish("pd_plustau_targets", command_for_robot.encode())
 
@@ -164,7 +184,8 @@ class LCMAgent():
         self.actions = torch.clip(actions[0:1, :], -clip_actions, clip_actions)
         self.publish_action(self.actions, hard_reset=hard_reset)
         time.sleep(max(self.dt - (time.time() - self.time), 0))
-        if self.timestep % 100 == 0: print(f'frq: {1 / (time.time() - self.time)} Hz');
+        if self.timestep % 100 == 0:
+            print(f"frq: {1 / (time.time() - self.time)} Hz")
         self.time = time.time()
         obs = self.get_obs()
 

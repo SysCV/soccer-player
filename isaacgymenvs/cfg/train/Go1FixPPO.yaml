@@ -35,7 +35,6 @@ params:
   load_checkpoint: ${if:${...checkpoint},True,False} # flag which sets whether to load the checkpoint
   load_path: ${...checkpoint} # path to the checkpoint to load
 
-
   config:
     name: ${resolve_default:A1,${....experiment}}
     full_experiment_name: ${.name}
@@ -59,13 +58,12 @@ params:
     truncate_grads: True
     grad_norm: 1.
     horizon_length: 24
-    minibatch_size: 32000 # 4000 * 24 / 3 = 32000
+    minibatch_size: 64000 # 8000 * 24 / 3 = 64000
     mini_epochs: 5
     critic_coef: 2
     clip_value: True
     seq_len: 4 # only for rnn
     bounds_loss_coef: 0.001
-    load_sigma: -1.0
 
     max_epochs: ${resolve_default:2000,${....max_iterations}}
     save_best_after: 200
@@ -75,8 +73,8 @@ params:
 
     player:
       games_num: 50000
-      generate_offline_data: false
+      generate_offline_data: true
       offline_save_dir: "./offline_data/go1.pt"
       discount_factor: 0.99
       offline_data_length: 2000 #  50 * 20 * 2 = 2000
-      deterministic: true
+      deterministic: False

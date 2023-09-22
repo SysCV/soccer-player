@@ -107,6 +107,7 @@ class Player(BasePlayer):
         env_state = checkpoint.get("env_state", None)
         if self.env is not None and env_state is not None:
             self.env.set_env_state(env_state)
+        self.model.a2c_network.reset_sigma(self.config["load_sigma"])
 
     def reset(self):
         self.init_rnn()
@@ -168,7 +169,7 @@ class Player(BasePlayer):
                 cr += r
                 steps += 1
                 vec_env_steps += 1
-                if vec_env_steps % 5 == 0:
+                if self.generate_offline_data and vec_env_steps % 5 == 0:
                     print("vec_env_steps", vec_env_steps)
 
                 if render:

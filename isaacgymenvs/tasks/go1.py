@@ -119,7 +119,16 @@ class Go1(VecTask):
         self.cfg = cfg
         self.wandb_extra_log = self.cfg["env"]["wandb_extra_log"]
         self.wandb_log_period = self.cfg["env"]["wandb_extra_log_period"]
+
+        self.plot_reward_debug = self.cfg["env"]["plot_reward_debug"]
+        if self.plot_reward_debug:
+            self.reward_plot_counter = 0
+            self.reward_print_list = []
+
+        self.do_rand = self.cfg["env"]["randomization"]
         self.random_frec = self.cfg["env"]["randomization_freq"]
+
+        self.enable_sound = self.cfg["env"]["enable_sound"]
 
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
@@ -272,6 +281,10 @@ class Go1(VecTask):
             cam_target = gymapi.Vec3(lookat[0], lookat[1], lookat[2])
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
 
+        if self.enable_sound:
+            self.sound_model_path = self.cfg["env"]["sound_model_path"]
+            self._load_sound_model()
+
         self.get_wrapped_tensor()
 
         self.init_curriculum()
@@ -332,6 +345,10 @@ class Go1(VecTask):
         ).unsqueeze(1)
 
     def get_wrapped_tensor(self):
+        if self.enable_sound:
+            self.sound_rms = torch.zeros(
+                (self.num_envs, 1), dtype=torch.float, device=self.device
+            )
         # default gait
         self.frequencies = (
             torch.ones(
@@ -340,7 +357,7 @@ class Go1(VecTask):
                 device=self.device,
                 requires_grad=False,
             )
-            * 3.0
+            * self.cfg["env"]["gait_condition"]["frequency"]
         )
 
         self.durations = (
@@ -350,7 +367,7 @@ class Go1(VecTask):
                 device=self.device,
                 requires_grad=False,
             )
-            * 0.5
+            * self.cfg["env"]["gait_condition"]["duration"]
         )
 
         # get gym state tensors
@@ -375,6 +392,7 @@ class Go1(VecTask):
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(
             self.num_envs, -1, 3
         )  # shape: num_envs, num_bodies, xyz axis
+        self.last_contact_forces = self.contact_forces.clone()
         self.torques = gymtorch.wrap_tensor(torques).view(self.num_envs, self.num_dof)
 
         self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[
@@ -722,6 +740,7 @@ class Go1(VecTask):
         self.last_last_targets = self.last_targets.clone()
         self.last_targets = self.targets.clone()
         self.last_dof_vel = self.dof_vel.clone()
+        self.last_contact_forces = self.contact_forces.clone()
         self.actions = actions.clone().to(self.device)
 
         actions_scaled = actions[:, :12] * self.action_scale
@@ -847,6 +866,9 @@ class Go1(VecTask):
             self.wandb_addtional_log()
         self.compute_reset()
 
+        if self.enable_sound:
+            self.sound_rms = self.sound_network(self.history_buffer).detach()
+
         self.compute_reward(self.actions)
 
         # because reward should be computed before command change, otherwise the agent will not observe the command change
@@ -855,7 +877,7 @@ class Go1(VecTask):
 
         self.compute_observations()
 
-        if self.step_counter % self.random_frec == 0:
+        if self.do_rand and self.step_counter % self.random_frec == 0:
             self.randomize_props()
         self.step_counter += 1
 
@@ -886,8 +908,16 @@ class Go1(VecTask):
                 self.rew_neg += rew
             episode_cumulative[name] = rew
 
-            # if name == 'tracking_lin_vel':
-            #     print("max velocity",torch.max(self.reward_functions[i]()).item(), self.reward_scales[name])
+            if self.plot_reward_debug and name == self.cfg["env"]["plot_reward_name"]:
+                self.reward_print_list.append(rew[0].item())
+                self.reward_plot_counter += 1
+                if self.reward_plot_counter == 100:
+                    self.reward_plot_counter = 0
+                    plt.plot(self.reward_print_list)
+                    plt.ylabel(name)
+                    plt.xlabel("step")
+                    plt.show()
+                    self.reward_print_list = []
 
             if name in [
                 "tracking_contacts_shaped_force",
@@ -970,7 +1000,7 @@ class Go1(VecTask):
 
         if self.obs_history:
             self.history_buffer[:] = torch.cat(
-                (obs, self.history_buffer[:, self.num_obs :]), dim=1
+                (self.history_buffer[:, self.num_obs :], obs), dim=1
             )
 
         if self.obs_privilige:
@@ -1026,6 +1056,16 @@ class Go1(VecTask):
         reset = reset | torch.any(
             torch.norm(self.contact_forces[:, self.knee_indices, :], dim=2) > 1.0, dim=1
         )
+
+        # foot_velocities_z = self.foot_velocities[:, :, 2].view(self.num_envs, -1)
+        # foot_velocities_z = torch.clamp_max(foot_velocities_z, 0.0)
+        # close_to_ground = (
+        #     self.foot_positions[:, :, 2]
+        #     < self.reward_params["ground_speed"]["near_ground_threshold"]
+        # )
+        # foot_velocities_z = foot_velocities_z * close_to_ground
+        # reset = reset | torch.any(foot_velocities_z < -0.5, dim=1)
+
         time_out = self.progress_buf >= self.max_episode_length - 1
         # reward for time-outs
         reset = reset | time_out
@@ -1291,10 +1331,6 @@ class Go1(VecTask):
             self.gait_indices + self.phases,
         ]
 
-        self.foot_indices = torch.remainder(
-            torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0
-        )
-
         for idxs in foot_indices:
             stance_idxs = torch.remainder(idxs, 1) < self.durations
             swing_idxs = torch.remainder(idxs, 1) > self.durations
@@ -1308,6 +1344,9 @@ class Go1(VecTask):
                 torch.remainder(idxs[swing_idxs], 1) - self.durations[swing_idxs]
             ) * (0.5 / (1 - self.durations[swing_idxs]))
 
+        self.foot_indices = torch.remainder(
+            torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0
+        )
         # if self.cfg.commands.durations_warp_clock_inputs:
 
         self.clock_inputs[:, 0] = torch.sin(2 * np.pi * foot_indices[0])
@@ -1394,3 +1433,15 @@ class Go1(VecTask):
         )
 
         self.actor_indices_for_reset = []
+
+    def _load_sound_model(self):
+        sound_network = torch.jit.load(self.sound_model_path).to(self.device)
+        sound_network.eval()
+
+        def eval_sound_network(batched_history):
+            batch_seq_dim = batched_history.view(self.num_envs, self.history_length, -1)
+            rms = sound_network(batch_seq_dim[:, :, 6:30])
+            # print("rms", rms)
+            return rms
+
+        self.sound_network = eval_sound_network

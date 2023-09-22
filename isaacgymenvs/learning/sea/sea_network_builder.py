@@ -77,7 +77,16 @@ class A2CBuilder(network_builder.NetworkBuilder):
             }
             self.actor_mlp = self._build_mlp(**mlp_args)
             if self.separate:
-                self.critic_mlp = self._build_mlp(**mlp_args)
+                c_mlp_args = {
+                    "input_size": in_osb_shape + out_history_shape,
+                    "units": self.units,
+                    "activation": self.activation,
+                    "norm_func_name": self.normalization,
+                    "dense_func": torch.nn.Linear,
+                    "d2rl": self.is_d2rl,
+                    "norm_only_first_layer": self.norm_only_first_layer,
+                }
+                self.critic_mlp = self._build_mlp(**c_mlp_args)
 
             self.value = torch.nn.Linear(out_size, self.value_size)
             self.value_act = self.activations_factory.create(self.value_activation)
@@ -129,6 +138,7 @@ class A2CBuilder(network_builder.NetworkBuilder):
 
         def forward(self, obs_dict):
             obs = obs_dict["obs"]
+            privilige_obs = obs["state_privilige"]
             state_obs = obs["state_obs"]
             state_history = obs["state_history"]
             states = obs_dict.get("rnn_states", None)
@@ -140,7 +150,11 @@ class A2CBuilder(network_builder.NetworkBuilder):
             latent = self.history_head(encode)
 
             out = self.actor_mlp(torch.cat([state_obs, latent], dim=1))
-            value = self.value_act(self.value(out))
+            if self.separate:
+                c_out = self.critic_mlp(torch.cat([state_obs, privilige_obs], dim=1))
+                value = self.value_act(self.value(c_out))
+            else:
+                value = self.value_act(self.value(out))
 
             if self.central_value:
                 return value, states

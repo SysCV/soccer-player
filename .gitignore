@@ -32,3 +32,4 @@ outputs/
 *.hydra*
 /isaacgymenvs/wandb
 /isaacgymenvs/offline_data
+isaacgymenvs/dataset/*

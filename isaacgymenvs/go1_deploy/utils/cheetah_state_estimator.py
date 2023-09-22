@@ -2,21 +2,27 @@ import math
 import select
 import threading
 import time
+import queue
 
 import numpy as np
 
-from isaacgymenvs.go1_deploy.lcm_types.leg_control_data_lcmt import leg_control_data_lcmt
+from isaacgymenvs.go1_deploy.lcm_types.leg_control_data_lcmt import (
+    leg_control_data_lcmt,
+)
 from isaacgymenvs.go1_deploy.lcm_types.rc_command_lcmt import rc_command_lcmt
 from isaacgymenvs.go1_deploy.lcm_types.state_estimator_lcmt import state_estimator_lcmt
+from isaacgymenvs.go1_deploy.lcm_types.noise_lcmt import noise_lcmt
 from isaacgymenvs.go1_deploy.lcm_types.camera_message_lcmt import camera_message_lcmt
-from isaacgymenvs.go1_deploy.lcm_types.camera_message_rect_wide import camera_message_rect_wide
+from isaacgymenvs.go1_deploy.lcm_types.camera_message_rect_wide import (
+    camera_message_rect_wide,
+)
 
 
 def get_rpy_from_quaternion(q):
     w, x, y, z = q
-    r = np.arctan2(2 * (w * x + y * z), 1 - 2 * (x ** 2 + y ** 2))
+    r = np.arctan2(2 * (w * x + y * z), 1 - 2 * (x**2 + y**2))
     p = np.arcsin(2 * (w * y - z * x))
-    y = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y ** 2 + z ** 2))
+    y = np.arctan2(2 * (w * z + x * y), 1 - 2 * (y**2 + z**2))
     return np.array([r, p, y])
 
 
@@ -29,20 +35,17 @@ def get_rotation_matrix_from_rpy(rpy):
         np.array[float[3,3]]: rotation matrix.
     """
     r, p, y = rpy
-    R_x = np.array([[1, 0, 0],
-                    [0, math.cos(r), -math.sin(r)],
-                    [0, math.sin(r), math.cos(r)]
-                    ])
+    R_x = np.array(
+        [[1, 0, 0], [0, math.cos(r), -math.sin(r)], [0, math.sin(r), math.cos(r)]]
+    )
 
-    R_y = np.array([[math.cos(p), 0, math.sin(p)],
-                    [0, 1, 0],
-                    [-math.sin(p), 0, math.cos(p)]
-                    ])
+    R_y = np.array(
+        [[math.cos(p), 0, math.sin(p)], [0, 1, 0], [-math.sin(p), 0, math.cos(p)]]
+    )
 
-    R_z = np.array([[math.cos(y), -math.sin(y), 0],
-                    [math.sin(y), math.cos(y), 0],
-                    [0, 0, 1]
-                    ])
+    R_z = np.array(
+        [[math.cos(y), -math.sin(y), 0], [math.sin(y), math.cos(y), 0], [0, 0, 1]]
+    )
 
     rot = np.dot(R_z, np.dot(R_y, R_x))
     return rot
@@ -50,13 +53,14 @@ def get_rotation_matrix_from_rpy(rpy):
 
 class StateEstimator:
     def __init__(self, lc, use_cameras=True):
-
         # reverse legs
         self.joint_idxs = [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]
         self.contact_idxs = [1, 0, 3, 2]
         # self.joint_idxs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
         self.lc = lc
+
+        self.rms_queue = queue.Queue()
 
         self.joint_pos = np.zeros(12)
         self.joint_vel = np.zeros(12)
@@ -78,7 +82,7 @@ class StateEstimator:
         self.smoothing_ratio = 0.2
 
         self.contact_state = np.ones(4)
-        self.contact_state_air = np.array([200,50,200,50]) # self calibration
+        self.contact_state_air = np.array([200, 50, 200, 50])  # self calibration
 
         self.mode = 0
         self.ctrlmode_left = 0
@@ -104,20 +108,28 @@ class StateEstimator:
         self.cmd_offset = 0.0
         self.cmd_duration = 0.5
 
-
         self.init_time = time.time()
         self.received_first_legdata = False
 
         self.imu_subscription = self.lc.subscribe("state_estimator_data", self._imu_cb)
-        self.legdata_state_subscription = self.lc.subscribe("leg_control_data", self._legdata_cb)
-        self.rc_command_subscription = self.lc.subscribe("rc_command", self._rc_command_cb)
+        self.legdata_state_subscription = self.lc.subscribe(
+            "leg_control_data", self._legdata_cb
+        )
+        self.rc_command_subscription = self.lc.subscribe(
+            "rc_command", self._rc_command_cb
+        )
+        self.noise_subscription = self.lc.subscribe("noise_data", self._noise_cb)
 
         if use_cameras:
             for cam_id in [1, 2, 3, 4, 5]:
-                self.camera_subscription = self.lc.subscribe(f"camera{cam_id}", self._camera_cb)
+                self.camera_subscription = self.lc.subscribe(
+                    f"camera{cam_id}", self._camera_cb
+                )
             self.camera_names = ["front", "bottom", "left", "right", "rear"]
             for cam_name in self.camera_names:
-                self.camera_subscription = self.lc.subscribe(f"rect_image_{cam_name}", self._rect_camera_cb)
+                self.camera_subscription = self.lc.subscribe(
+                    f"rect_image_{cam_name}", self._rect_camera_cb
+                )
         self.camera_image_left = None
         self.camera_image_right = None
         self.camera_image_front = None
@@ -132,8 +144,11 @@ class StateEstimator:
         return self.body_lin_vel
 
     def get_body_angular_vel(self):
-        self.body_ang_vel = self.smoothing_ratio * np.mean(self.deuler_history / self.dt_history, axis=0) + (
-                    1 - self.smoothing_ratio) * self.body_ang_vel
+        self.body_ang_vel = (
+            self.smoothing_ratio
+            * np.mean(self.deuler_history / self.dt_history, axis=0)
+            + (1 - self.smoothing_ratio) * self.body_ang_vel
+        )
         return self.body_ang_vel
 
     def get_gravity_vector(self):
@@ -158,7 +173,7 @@ class StateEstimator:
             self.right_upper_switch_pressed = False
 
         # MODE_LEFT = MODES_LEFT[self.ctrlmode_left]
-        MODE_LEFT = MODES_LEFT[1] # here fix the mode left
+        MODE_LEFT = MODES_LEFT[1]  # here fix the mode left
         MODE_RIGHT = MODES_RIGHT[self.ctrlmode_right]
 
         # always in use
@@ -166,20 +181,20 @@ class StateEstimator:
         cmd_yaw = -1 * self.right_stick[0]
 
         # default values
-        cmd_y = 0.  # -1 * self.left_stick[0]
-        cmd_height = 0.
+        cmd_y = 0.0  # -1 * self.left_stick[0]
+        cmd_height = 0.0
         cmd_footswing = 0.08
         cmd_stance_width = 0.33
         cmd_stance_length = 0.40
-        cmd_ori_pitch = 0.
-        cmd_ori_roll = 0.
+        cmd_ori_pitch = 0.0
+        cmd_ori_roll = 0.0
         cmd_freq = 3.0
 
         # joystick commands
         if MODE_LEFT == "body_height":
             cmd_height = 0.3 * self.left_stick[0]
         elif MODE_LEFT == "lat_vel":
-            cmd_y = - 1.0 * self.left_stick[0] # here y is inversed from controller
+            cmd_y = -1.0 * self.left_stick[0]  # here y is inversed from controller
         elif MODE_LEFT == "stance_width":
             cmd_stance_width = 0.275 + 0.175 * self.left_stick[0]
         if MODE_RIGHT == "step_frequency":
@@ -218,12 +233,59 @@ class StateEstimator:
             self.cmd_bound = 0.0
             self.cmd_duration = 0.5
 
-        return np.array([cmd_x, cmd_y, cmd_yaw, cmd_height, cmd_freq, self.cmd_phase, self.cmd_offset, self.cmd_bound,
-                         self.cmd_duration, cmd_footswing, cmd_ori_pitch, cmd_ori_roll, cmd_stance_width,
-                         cmd_stance_length, 0, 0, 0, 0, 0])
+        return np.array(
+            [
+                cmd_x,
+                cmd_y,
+                cmd_yaw,
+                cmd_height,
+                cmd_freq,
+                self.cmd_phase,
+                self.cmd_offset,
+                self.cmd_bound,
+                self.cmd_duration,
+                cmd_footswing,
+                cmd_ori_pitch,
+                cmd_ori_roll,
+                cmd_stance_width,
+                cmd_stance_length,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ]
+        )
 
     def get_buttons(self):
-        return np.array([self.left_lower_left_switch, self.left_upper_switch, self.right_lower_right_switch, self.right_upper_switch])
+        return np.array(
+            [
+                self.left_lower_left_switch,
+                self.left_upper_switch,
+                self.right_lower_right_switch,
+                self.right_upper_switch,
+            ]
+        )
+
+    def get_rms(self):
+        """Calculate the average 'rms' from the queue and clear it."""
+        if self.rms_queue.empty():
+            return 0  # Return None if the queue is empty
+
+        sum_of_squares = 0
+        count = 0
+
+        # Calculate the sum of squares and count of 'rms' values in the queue
+        while not self.rms_queue.empty():
+            rms = self.rms_queue.get()
+            sum_of_squares += rms * rms
+            count += 1
+
+        # Calculate the average 'rms'
+        average_rms = math.sqrt(sum_of_squares / count)
+
+        print(" msg in queue: ", count, "/10", end=" ")
+        return average_rms
 
     def get_dof_pos(self):
         # print("dofposquery", self.joint_pos[self.joint_idxs])
@@ -268,22 +330,35 @@ class StateEstimator:
         msg = leg_control_data_lcmt.decode(data)
         # print(msg.q)
         self.joint_pos = np.array(msg.q)
+        # print(self.joint_pos)
         self.joint_vel = np.array(msg.qd)
         self.tau_est = np.array(msg.tau_est)
         # print(f"update legdata {msg.id}")
+
+    def _noise_cb(self, channel, data):
+        # print("update noise")
+        msg = noise_lcmt.decode(data)
+        self.rms_queue.put(msg.rms)
 
     def _imu_cb(self, channel, data):
         # print("update imu")
         msg = state_estimator_lcmt.decode(data)
 
         self.euler = np.array(msg.rpy)
+        # print(self.euler)
 
         self.R = get_rotation_matrix_from_rpy(self.euler)
 
-        self.contact_state = 1.0 * (np.array(msg.contact_estimate) > self.contact_state_air)
-
-        self.deuler_history[self.buf_idx % self.smoothing_length, :] = msg.rpy - self.euler_prev
-        self.dt_history[self.buf_idx % self.smoothing_length] = time.time() - self.timuprev
+        self.contact_state = 1.0 * (
+            np.array(msg.contact_estimate) > self.contact_state_air
+        )
+        # print(np.array(msg.contact_estimate))
+        self.deuler_history[self.buf_idx % self.smoothing_length, :] = (
+            msg.rpy - self.euler_prev
+        )
+        self.dt_history[self.buf_idx % self.smoothing_length] = (
+            time.time() - self.timuprev
+        )
 
         self.timuprev = time.time()
 
@@ -294,16 +369,26 @@ class StateEstimator:
         pass
 
     def _rc_command_cb(self, channel, data):
-
         msg = rc_command_lcmt.decode(data)
 
-
-        self.left_upper_switch_pressed = ((msg.left_upper_switch and not self.left_upper_switch) or self.left_upper_switch_pressed)
-        self.left_lower_left_switch_pressed = ((msg.left_lower_left_switch and not self.left_lower_left_switch) or self.left_lower_left_switch_pressed)
-        self.left_lower_right_switch_pressed = ((msg.left_lower_right_switch and not self.left_lower_right_switch) or self.left_lower_right_switch_pressed)
-        self.right_upper_switch_pressed = ((msg.right_upper_switch and not self.right_upper_switch) or self.right_upper_switch_pressed)
-        self.right_lower_left_switch_pressed = ((msg.right_lower_left_switch and not self.right_lower_left_switch) or self.right_lower_left_switch_pressed)
-        self.right_lower_right_switch_pressed = ((msg.right_lower_right_switch and not self.right_lower_right_switch) or self.right_lower_right_switch_pressed)
+        self.left_upper_switch_pressed = (
+            msg.left_upper_switch and not self.left_upper_switch
+        ) or self.left_upper_switch_pressed
+        self.left_lower_left_switch_pressed = (
+            msg.left_lower_left_switch and not self.left_lower_left_switch
+        ) or self.left_lower_left_switch_pressed
+        self.left_lower_right_switch_pressed = (
+            msg.left_lower_right_switch and not self.left_lower_right_switch
+        ) or self.left_lower_right_switch_pressed
+        self.right_upper_switch_pressed = (
+            msg.right_upper_switch and not self.right_upper_switch
+        ) or self.right_upper_switch_pressed
+        self.right_lower_left_switch_pressed = (
+            msg.right_lower_left_switch and not self.right_lower_left_switch
+        ) or self.right_lower_left_switch_pressed
+        self.right_lower_right_switch_pressed = (
+            msg.right_lower_right_switch and not self.right_lower_right_switch
+        ) or self.right_lower_right_switch_pressed
 
         self.mode = msg.mode
         self.right_stick = msg.right_stick
@@ -337,15 +422,26 @@ class StateEstimator:
         else:
             print("Image received from camera with unknown ID#!")
 
-        #im = Image.fromarray(img).convert('RGB')
+        # im = Image.fromarray(img).convert('RGB')
 
-        #im.save("test_image_" + channel + ".jpg")
-        #print(channel)
+        # im.save("test_image_" + channel + ".jpg")
+        # print(channel)
 
     def _rect_camera_cb(self, channel, data):
-        message_types = [camera_message_rect_wide, camera_message_rect_wide, camera_message_rect_wide,
-                         camera_message_rect_wide, camera_message_rect_wide]
-        image_shapes = [(116, 100, 3), (116, 100, 3), (116, 100, 3), (116, 100, 3), (116, 100, 3)]
+        message_types = [
+            camera_message_rect_wide,
+            camera_message_rect_wide,
+            camera_message_rect_wide,
+            camera_message_rect_wide,
+            camera_message_rect_wide,
+        ]
+        image_shapes = [
+            (116, 100, 3),
+            (116, 100, 3),
+            (116, 100, 3),
+            (116, 100, 3),
+            (116, 100, 3),
+        ]
 
         cam_name = channel.split("_")[-1]
         # print(f"received py from {cam_name}")
@@ -354,9 +450,19 @@ class StateEstimator:
         msg = message_types[cam_id - 1].decode(data)
 
         img = np.fromstring(msg.data, dtype=np.uint8)
-        img = np.flip(np.flip(
-            img.reshape((image_shapes[cam_id - 1][2], image_shapes[cam_id - 1][1], image_shapes[cam_id - 1][0])),
-            axis=0), axis=1).transpose(1, 2, 0)
+        img = np.flip(
+            np.flip(
+                img.reshape(
+                    (
+                        image_shapes[cam_id - 1][2],
+                        image_shapes[cam_id - 1][1],
+                        image_shapes[cam_id - 1][0],
+                    )
+                ),
+                axis=0,
+            ),
+            axis=1,
+        ).transpose(1, 2, 0)
         # print(img.shape)
         # img = np.flip(np.flip(img.reshape(image_shapes[cam_id - 1]), axis=0), axis=1)[:, :,
         #       [2, 1, 0]]  # .transpose(1, 2, 0)

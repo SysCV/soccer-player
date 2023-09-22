@@ -139,6 +139,18 @@ class Go1Real(VecTask):
         self.phases = self.cfg["env"]["gait_condition"]["phases"]
         self.offsets = self.cfg["env"]["gait_condition"]["offsets"]
         self.bounds = self.cfg["env"]["gait_condition"]["bounds"]
+        self.durations = self.cfg["env"]["gait_condition"]["duration"]
+        self.frequency = self.cfg["env"]["gait_condition"]["frequency"]
+
+        # record sound
+        self.record_sound = self.cfg["env"]["make_sound_dataset"]
+        if self.record_sound:
+            self.dataset_cache_dict = {
+                "leg": [],
+                "rms": [],
+            }
+            self.dataset_index = 0
+            self.last_dataset_index = 0
 
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
@@ -353,7 +365,7 @@ class Go1Real(VecTask):
     def create_sim(self):
         pass
 
-    def calibrate(self, wait=True, low=False):
+    def calibrate(self, wait=True, low=False, save=False):
         # first, if the robot is not in nominal pose, move slowly to the nominal pose
         print("Calibrating the robot to stand pose!!!!")
         if hasattr(self.agents["hardware_closed_loop"], "get_obs"):
@@ -396,7 +408,7 @@ class Go1Real(VecTask):
             target_sequence = []
             target = joint_pos - nominal_joint_pos
             while np.max(np.abs(target - final_goal)) > 0.01:
-                target -= np.clip((target - final_goal), -0.05, 0.05)
+                target -= np.clip((target - final_goal), -0.02, 0.02)
                 target_sequence += [copy.deepcopy(target)]
             for target in target_sequence:
                 next_target = target
@@ -409,10 +421,12 @@ class Go1Real(VecTask):
                 cal_action[:, 0:12] = next_target
                 agent.step_once(torch.from_numpy(cal_action))
                 agent.get_obs()
-                time.sleep(0.05)
+                time.sleep(0.1)
 
             print("Starting pose calibrated [Press R2 to start controller]")
             self.reset_gait_indices()
+            if save:
+                self.save_sound_dataset()
             while True:
                 self.button_states = self.command_profile.get_buttons()
                 if (
@@ -484,9 +498,9 @@ class Go1Real(VecTask):
         )  # default pos will be added inside the agent
 
         time.sleep(max(self.dt - (time.time() - self.time), 0))
-        if self.control_steps % 100 == 0:
-            print(f"frq: {1 / (time.time() - self.time)} Hz", end=" ")
-            print(f"control_steps: {self.control_steps}")
+        # if self.control_steps % 100 == 0:
+        #     print(f"frq: {1 / (time.time() - self.time)} Hz", end=" ")
+        #     print(f"control_steps: {self.control_steps}", end=" ")
         self.time = time.time()
 
     def step(
@@ -529,7 +543,9 @@ class Go1Real(VecTask):
         )
 
     def post_physics_step(self):
-        self.gait_indices = torch.remainder(self.gait_indices + self.dt * 3.0, 1.0)
+        self.gait_indices = torch.remainder(
+            self.gait_indices + self.dt * self.frequency, 1.0
+        )
 
         foot_indices = [
             self.gait_indices + self.phases + self.offsets + self.bounds,
@@ -537,6 +553,19 @@ class Go1Real(VecTask):
             self.gait_indices + self.bounds,
             self.gait_indices + self.phases,
         ]
+
+        for idxs in foot_indices:
+            stance_idxs = torch.remainder(idxs, 1) < self.durations
+            swing_idxs = torch.remainder(idxs, 1) > self.durations
+
+            # print(stance_idxs)
+            idxs[stance_idxs] = torch.remainder(idxs[stance_idxs], 1) * (
+                0.5 / self.durations
+            )
+
+            idxs[swing_idxs] = 0.5 + (
+                torch.remainder(idxs[swing_idxs], 1) - self.durations
+            ) * (0.5 / (1 - self.durations))
 
         self.foot_indices = torch.remainder(
             torch.cat([foot_indices[i].unsqueeze(1) for i in range(4)], dim=1), 1.0
@@ -556,10 +585,10 @@ class Go1Real(VecTask):
 
         rpy = self.agents[self.control_agent_name].se.get_rpy()
         if abs(rpy[0]) > 1.6 or abs(rpy[1]) > 1.6:
-            self.calibrate(wait=False, low=True)
+            self.calibrate(wait=False, low=True, save=self.record_sound)
 
         if self.command_profile.state_estimator.right_lower_right_switch_pressed:
-            self.calibrate(wait=False)
+            self.calibrate(wait=False, save=self.record_sound)
             time.sleep(1)
             self.command_profile.state_estimator.right_lower_right_switch_pressed = (
                 False
@@ -580,6 +609,8 @@ class Go1Real(VecTask):
     def compute_observations(self):
         obs = self.agents["hardware_closed_loop"].get_obs()
 
+        self.noise = self.agents["hardware_closed_loop"].get_privileged_observations()
+        self.draw_bar(self.noise)
         gravity_vec = obs[:, 0:3]
         commands = obs[:, 3:6]
 
@@ -629,8 +660,38 @@ class Go1Real(VecTask):
 
         if self.obs_history:
             self.history_buffer[:] = torch.cat(
-                (obs, self.history_buffer[:, self.num_obs :]), dim=1
+                (self.history_buffer[:, self.num_obs :], obs), dim=1
             )
+
+        if self.record_sound:
+            self.process_sound_dataset()
+
+    def process_sound_dataset(self):
+        history_seq = self.history_buffer.view(1, self.history_length, self.num_obs)
+        self.dataset_cache_dict["leg"].append(history_seq[:, :, 6:30].cpu())
+        self.dataset_cache_dict["rms"].append(torch.tensor(self.noise).view(1, 1).cpu())
+        self.dataset_index += 1
+
+    def save_sound_dataset(self):
+        print("=== Saving sound dataset ===")
+        save_path = os.path.join(
+            self.cfg["env"]["sound_dataset_dir"],
+            "sound_dataset_{}_{}.pkl".format(
+                self.last_dataset_index, self.dataset_index
+            ),
+        )
+        save_dict = {
+            "leg": torch.cat(self.dataset_cache_dict["leg"]),
+            "rms": torch.cat(self.dataset_cache_dict["rms"]),
+        }
+        with open(save_path, "wb") as f:
+            torch.save(save_dict, f)
+
+        self.last_dataset_index = self.dataset_index
+        self.dataset_cache_dict = {
+            "leg": [],
+            "rms": [],
+        }
 
     def reset_idx(self, env_ids):
         pass
@@ -674,3 +735,9 @@ class Go1Real(VecTask):
             self.obs_dict["states"] = self.get_state()
 
         return self.obs_dict
+
+    def draw_bar(self, noise, length=50):
+        bar_length = int(noise * length * 2)
+        bar = "#" * bar_length + "-" * (length - bar_length)
+        sys.stdout.write(f"\r[{bar}] rms: {noise} ")
+        sys.stdout.flush()

@@ -11,7 +11,7 @@ params:
 
   network:
     name: actor_critic_sea # actor_critic # actor_critic_pixel
-    separate: False
+    separate: True
 
     space:
       continuous:

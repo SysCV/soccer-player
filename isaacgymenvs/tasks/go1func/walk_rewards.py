@@ -126,11 +126,80 @@ class RewardTerms:
         # Reward forward velocity
         return torch.square(self.env.base_lin_vel[:, 2])
 
+    def _reward_ground_impact_neg(self):
+        diff_force = torch.norm(
+            self.env.contact_forces[:, self.env.feet_indices, :], dim=2
+        ) - torch.norm(self.env.last_contact_forces[:, self.env.feet_indices, :], dim=2)
+        diff_force = torch.clamp_min(diff_force, 0.0)
+        # print("diff_force: ", diff_force[:, 0])
+        return torch.sum(
+            diff_force**2
+            / self.env.reward_params["tracking_contacts_shaped_force"]["sigma"],
+            dim=1,
+        )
+
+    def _reward_ground_impact_posi(self):
+        diff_force = torch.norm(
+            self.env.contact_forces[:, self.env.feet_indices, :], dim=2
+        ) - torch.norm(self.env.last_contact_forces[:, self.env.feet_indices, :], dim=2)
+        diff_force = torch.clamp_min(diff_force, 0.0)
+        return torch.exp(
+            -torch.sum(
+                diff_force**2
+                / self.env.reward_params["tracking_contacts_shaped_force"]["sigma"]
+                ** 2,
+                dim=1,
+            )
+        )
+
+    def _reward_ground_speed_neg(self):
+        foot_velocities_z = self.env.foot_velocities[:, :, 2].view(
+            self.env.num_envs, -1
+        )
+        foot_velocities_z = torch.clamp_max(foot_velocities_z, 0.0)
+        close_to_ground = (
+            self.env.foot_positions[:, :, 2]
+            < self.env.reward_params["ground_speed"]["near_ground_threshold"]
+        )
+        # print("foor_vel: ", foot_velocities_z[:, 0])
+        # print("close_to_ground: ", close_to_ground[:, 0])
+        foot_velocities_z = foot_velocities_z * close_to_ground
+        return torch.sum(
+            torch.square(foot_velocities_z)
+            / self.env.reward_params["tracking_contacts_shaped_vel"]["sigma"],
+            dim=1,
+        )
+
+    def _reward_ground_speed_posi(self):
+        foot_velocities_z = self.env.foot_velocities[:, :, 2].view(
+            self.env.num_envs, -1
+        )
+        foot_velocities_z = torch.clamp_max(foot_velocities_z, 0.0)
+        close_to_ground = (
+            self.env.foot_positions[:, :, 2]
+            < self.env.reward_params["ground_speed"]["near_ground_threshold"]
+        )
+        # print("foor_vel: ", foot_velocities_z[:, 0])
+        # print("close_to_ground: ", close_to_ground[:, 0])
+        foot_velocities_z = foot_velocities_z * close_to_ground
+        return torch.exp(
+            -torch.sum(
+                torch.square(foot_velocities_z)
+                / self.env.reward_params["tracking_contacts_shaped_vel"]["sigma"],
+                dim=1,
+            )
+        )
+
+    def _reward_sound_posi(self):
+        return torch.exp(-self.env.sound_rms.squeeze(-1) ** 2 / 0.1)
+        # return torch.exp(-self.env.sound_rms.squeeze(-1) / 100000.0)
+
     def _reward_tracking_contacts_shaped_force(self):
         foot_forces = torch.norm(
             self.env.contact_forces[:, self.env.feet_indices, :], dim=-1
         )
         desired_contact = self.env.desired_contact_states
+        # print(desired_contact)
 
         reward = 0
         for i in range(4):
@@ -173,6 +242,21 @@ class RewardTerms:
             dim=1,
         )
 
+    def _reward_feet_clearance(self):
+        phases = 1 - torch.abs(
+            1.0 - torch.clip((self.env.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0
+        )
+        foot_height = (self.env.foot_positions[:, :, 2]).view(
+            self.env.num_envs, -1
+        )  # - reference_heights
+        target_height = (
+            self.env.reward_params["feet_clearance"]["height"] * phases + 0.02
+        )  # offset for foot radius 2cm
+        rew_foot_clearance = torch.square(target_height - foot_height) * (
+            1 - self.env.desired_contact_states
+        )
+        return torch.sum(rew_foot_clearance, dim=1)
+
     def _reward_raibert_heuristic(self):
         cur_footsteps_translated = (
             self.env.foot_positions - self.env.base_pos.unsqueeze(1)
@@ -213,14 +297,21 @@ class RewardTerms:
         # print("foot_step: ", footsteps_in_body_frame[:, :, 0:3])
 
         # raibert offsets
-        phases = torch.abs(1.0 - (self.env.foot_indices * 2.0)) * 1.0 - 0.5
+        duration = self.env.cfg["env"]["gait_condition"]["duration"]
+        # foot_indices_rh = torch.where(
+        #     self.env.foot_indices <= duration,
+        #     0.5 * self.env.foot_indices / duration,
+        #     (1 - 0.5 * (1 - self.env.foot_indices) / (1 - duration)),
+        # )
+        foot_indices_rh = self.env.foot_indices
+        phases = torch.abs(1.0 - (foot_indices_rh * 2.0)) * 1.0 - 0.5
         frequencies = self.env.frequencies
         x_vel_des = self.env.commands[:, 0:1]
         yaw_vel_des = self.env.commands[:, 2:3]
         y_vel_des = yaw_vel_des * desired_stance_length / 2
-        desired_ys_offset = phases * y_vel_des * (0.5 / frequencies.unsqueeze(1))
+        desired_ys_offset = phases * y_vel_des * (duration / frequencies.unsqueeze(1))
         desired_ys_offset[:, 2:4] *= -1
-        desired_xs_offset = phases * x_vel_des * (0.5 / frequencies.unsqueeze(1))
+        desired_xs_offset = phases * x_vel_des * (duration / frequencies.unsqueeze(1))
 
         desired_ys_nom = desired_ys_nom + desired_ys_offset
         desired_xs_nom = desired_xs_nom + desired_xs_offset

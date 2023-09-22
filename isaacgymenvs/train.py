@@ -102,7 +102,8 @@ def launch_rlg_hydra(cfg: DictConfig):
     from rl_games.common import env_configurations, vecenv
     from rl_games.torch_runner import Runner
     from rl_games.algos_torch import model_builder
-    from rl_games.algos_torch import a2c_continuous
+
+    #     from rl_games.algos_torch import a2c_continuous
 
     from isaacgymenvs.learning import amp_continuous
     from isaacgymenvs.learning import amp_players
@@ -118,7 +119,8 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning.baseline import state_network_builder
 
     #     from isaacgymenvs.learning.baseline import state_player
-    from isaacgymenvs.learning.baseline import state_player_eval as state_player
+    from isaacgymenvs.learning.baseline import state_player as state_player
+    from isaacgymenvs.learning.baseline import state_agent
 
     # _eval
 
@@ -255,7 +257,7 @@ def launch_rlg_hydra(cfg: DictConfig):
             "amp_continuous", lambda **kwargs: amp_continuous.AMPAgent(**kwargs)
         )
         runner.algo_factory.register_builder(
-            "base_ac", lambda **kwargs: a2c_continuous.A2CAgent(**kwargs)
+            "base_ac", lambda **kwargs: state_agent.A2CAgent(**kwargs)
         )
         runner.algo_factory.register_builder(
             "pixel_ac", lambda **kwargs: handwirte_agent.A2CPixelAgent(**kwargs)

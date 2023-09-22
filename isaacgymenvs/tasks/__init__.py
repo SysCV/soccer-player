@@ -35,7 +35,7 @@ from .ant import Ant
 from .anymal import Anymal
 from .anymal_terrain import AnymalTerrain
 from .ball_balance import BallBalance
-from .cartpole import Cartpole 
+from .cartpole import Cartpole
 from .factory.factory_task_gears import FactoryTaskGears
 from .factory.factory_task_insertion import FactoryTaskInsertion
 from .factory.factory_task_nut_bolt_pick import FactoryTaskNutBoltPick
@@ -49,14 +49,19 @@ from .ingenuity import Ingenuity
 from .quadcopter import Quadcopter
 from .shadow_hand import ShadowHand
 from .allegro_hand import AllegroHand
-from .dextreme.allegro_hand_dextreme import AllegroHandDextremeManualDR, AllegroHandDextremeADR
+from .dextreme.allegro_hand_dextreme import (
+    AllegroHandDextremeManualDR,
+    AllegroHandDextremeADR,
+)
 from .trifinger import Trifinger
 
 from .allegro_kuka.allegro_kuka_reorientation import AllegroKukaReorientation
 from .allegro_kuka.allegro_kuka_regrasping import AllegroKukaRegrasping
 from .allegro_kuka.allegro_kuka_throw import AllegroKukaThrow
 from .allegro_kuka.allegro_kuka_two_arms_regrasping import AllegroKukaTwoArmsRegrasping
-from .allegro_kuka.allegro_kuka_two_arms_reorientation import AllegroKukaTwoArmsReorientation
+from .allegro_kuka.allegro_kuka_two_arms_reorientation import (
+    AllegroKukaTwoArmsReorientation,
+)
 
 
 def resolve_allegro_kuka(cfg, *args, **kwargs):
@@ -72,6 +77,7 @@ def resolve_allegro_kuka(cfg, *args, **kwargs):
         raise ValueError(f"Unknown subtask={subtask_name} in {subtask_map}")
 
     return subtask_map[subtask_name](cfg, *args, **kwargs)
+
 
 def resolve_allegro_kuka_two_arms(cfg, *args, **kwargs):
     subtask_name: str = cfg["env"]["subtask"]
@@ -90,8 +96,9 @@ def resolve_allegro_kuka_two_arms(cfg, *args, **kwargs):
 isaacgym_task_map = {
     "Go1Real": Go1Real,
     "Go1": Go1,
+    "Go1Fix": Go1,
     "Go1WallKicker": Go1WallKicker,
-    "Go1BallShoot": Go1BallShoot, 
+    "Go1BallShoot": Go1BallShoot,
     "AllegroHand": AllegroHand,
     "AllegroKuka": resolve_allegro_kuka,
     "AllegroKukaTwoArms": resolve_allegro_kuka_two_arms,
