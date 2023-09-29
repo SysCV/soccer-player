@@ -33,10 +33,10 @@ env:
 
     # ball_states_p: 3
     # goal_pose: 3
-    ball_2d_close: 2
+    # ball_2d_close: 2
 
     pixel_bbox_ball: 4
-    pixel_bbox_goal: 4
+    # pixel_bbox_goal: 4
 
     # base_lin_vel: 3
     # base_ang_vel: 3
@@ -60,7 +60,7 @@ env:
 
     ball_states_v: 3
     ball_states_p: 3
-    goal_pose: 3
+    # goal_pose: 3
 
     base_quat: 4
     ball_event: 1
@@ -92,7 +92,7 @@ env:
 
   goalInitState:
     pos: [3.0, 0.0, 0.15] # x,y,z [m]
-    randomPosRange: [0.0, 2.0, 0.0]
+    randomPosRange: [0.0, 0.0, 0.0]
 
   wallInitState:
     pos: [3.01, 0.0, 0.5] # x,y,z [m]
