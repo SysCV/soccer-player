@@ -47,7 +47,7 @@ class Converter:
         self.mapX, self.mapY = cv2.fisheye.initUndistortRectifyMap(
             self.input_K,
             self.input_D,
-            np.array([0.0, 0.0, 0.0]),
+            np.array([0.6, 0.0, 0.0]),
             self.output_K,
             (self.equirectWidth, self.equirectHeight),
             cv2.CV_32FC1,

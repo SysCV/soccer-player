@@ -127,6 +127,7 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning.sea import sea_agent
     from isaacgymenvs.learning.sea import sea_models
     from isaacgymenvs.learning.sea import sea_network_builder
+    from isaacgymenvs.learning.sea import sea_player as sea_player
 
     from isaacgymenvs.learning.rma import rma_agent
     from isaacgymenvs.learning.rma import rma_models
@@ -292,6 +293,9 @@ def launch_rlg_hydra(cfg: DictConfig):
         )
         runner.player_factory.register_builder(
             "waq_ac", lambda **kwargs: waq_player.Player(**kwargs)
+        )
+        runner.player_factory.register_builder(
+            "sea_ac", lambda **kwargs: sea_player.Player(**kwargs)
         )
 
         model_builder.register_model(

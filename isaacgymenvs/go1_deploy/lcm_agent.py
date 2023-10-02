@@ -132,7 +132,7 @@ class LCMAgent:
 
         return torch.tensor(ob, device=self.device).float()
 
-    def get_privileged_observations(self):
+    def get_extra_observations(self):
         return self.se.get_rms()
 
     def publish_action(self, action, hard_reset=False):

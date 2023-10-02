@@ -16,7 +16,7 @@ env:
   plot_reward_debug: true
   plot_reward_name: "sound_posi"
 
-  enable_sound: true
+  enable_sound: false
   sound_model_path: "./dataset/mlp.pt"
 
   obs_history: true

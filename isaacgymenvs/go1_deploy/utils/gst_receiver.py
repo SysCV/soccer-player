@@ -3,13 +3,75 @@
 BlueRov video capture class
 """
 
+import atexit
 import cv2
 import gi
 import numpy as np
+import threading
+import sys
+import signal
+
 from isaacgymenvs.go1_deploy.utils.fisheye import Converter
+from ultralytics import YOLO
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
+
+
+class ObjectDetector:
+    def __init__(self, detection_model, converter):
+        self.detection_model = detection_model
+        self.converter = converter
+        self.frame = None
+        self.detection_result = None
+        self.lock = threading.Lock()
+        self.stop_thread = False
+
+        # Start a separate thread for detection
+        self.thread = threading.Thread(target=self._detect_thread)
+        self.thread.daemon = (
+            True  # Allow the program to exit even if this thread is running
+        )
+
+        atexit.register(self.stop)
+        self.thread.start()
+
+    def detect(self, frame):
+        # Set the current frame for detection
+        with self.lock:
+            self.frame = frame.copy()
+
+    def get_detection_result(self):
+        # Get the latest detection result
+        with self.lock:
+            return self.detection_result
+
+    def _detect_thread(self):
+        while not self.stop_thread:
+            if self.frame is not None:
+                # Perform object detection on the current frame
+                pinhole_frame = self.converter.fish_to_pinhole(self.frame)
+                # cv2.imshow("origin-backend", self.frame)
+                # cv2.imshow("pinhole-backend", pinhole_frame)
+                print("loop running ... ")
+                cv2.waitKey(10)
+                results = self.detection_model.predict(
+                    pinhole_frame, show=True, stream=False, device="cuda:1"
+                )
+
+                # for r in results:
+                #     im_array = r.plot()  # plot a BGR numpy array of predictions
+                #     cv2.imshow("result", im_array)
+                # cv2.waitKey(1)
+
+                # Store the detection result
+                # with self.lock:
+                #     self.detection_result = results
+                # print(results.)
+
+    def stop(self):
+        self.stop_thread = True
+        self.thread.join()
 
 
 class Video:
@@ -59,6 +121,12 @@ class Video:
         self.video_sink = None
 
         self.run()
+
+        self.model = YOLO(
+            "/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/dataset/best_93.pt"
+        )
+        self.converter = Converter()
+        # self.detector = ObjectDetector(self.model, self.converter)
 
     def start_gst(self, config=None):
         """ Start gstreamer pipeline and sink
@@ -111,11 +179,18 @@ class Video:
         Returns:
             np.ndarray: latest retrieved image frame
         """
-        if self.frame_available:
+        if self.frame_available():
             self.latest_frame = self._new_frame
             # reset to indicate latest frame has been 'consumed'
             self._new_frame = None
         return self.latest_frame
+
+    def dectection_result(self):
+        pinhole_frame = self.converter.fish_to_pinhole(self.frame())
+        result = self.model.predict(
+            pinhole_frame, show=False, stream=True, device="cuda:1", verbose=False
+        )
+        return result
 
     def frame_available(self):
         """Check if a new frame is available
@@ -150,6 +225,7 @@ if __name__ == "__main__":
     # Create the video object
     # Add port= if is necessary to use a different one
     video = Video()
+    # model = YOLO("./dataset/best_93.pt")
 
     print("Initialising stream...")
     waited = 0
@@ -187,11 +263,18 @@ if __name__ == "__main__":
                     # Only retrieve and display a frame if it's new
                     frame = video.frame()
                     # Convert fisheye to equirectangular
-                    pinhole_frame = convert.fish_to_pinhole(frame)
+                    # pinhole_frame = convert.fish_to_pinhole(frame)
                     cv2.imshow("origin", frame)
 
                     # Display the frame
-                    cv2.imshow("frame", pinhole_frame)
+                    # cv2.imshow("frame", pinhole_frame)
+
+                    results = video.dectection_result()
+
+                    for r in results:
+                        print(r.boxes)
+                        im_array = r.plot()  # plot a BGR numpy array of predictions
+                        cv2.imshow("result", im_array)
 
                     # Save the frame as a picture if save_frames is True
                     if save_frames:

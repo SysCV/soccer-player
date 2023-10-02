@@ -109,11 +109,12 @@ from isaacgymenvs.go1_deploy.utils.cheetah_state_estimator import StateEstimator
 from isaacgymenvs.go1_deploy.utils.command_profile import *
 
 import pathlib
+import cv2
 
 lc = lcm.LCM("udpm://239.255.76.67:7667?ttl=255")
 
 
-class Go1Real(VecTask):
+class BallReal(VecTask):
     def __init__(
         self,
         cfg,
@@ -212,6 +213,22 @@ class Go1Real(VecTask):
                 np.ones(self.num_obs * self.history_length) * np.Inf,
             )
 
+        # priviledge
+        self.obs_privilige = self.cfg["env"]["obs_privilege"]
+        if self.obs_privilige:
+            privious_obs_dict = self.cfg["env"]["priviledgeStates"]
+            privious_obs_dim = 0
+            print("privious_obs_dict:", privious_obs_dict)
+            for val in privious_obs_dict.values():
+                privious_obs_dim += val
+            self.privilige_length = privious_obs_dim
+
+        if self.obs_privilige:
+            obs_space_dict["state_privilige"] = spaces.Box(
+                np.ones(self.privilige_length) * -np.Inf,
+                np.ones(self.privilige_length) * np.Inf,
+            )
+
         self.obs_space = spaces.Dict(obs_space_dict)
 
         self.state_space = spaces.Box(
@@ -235,7 +252,7 @@ class Go1Real(VecTask):
         # ==================== for real robot =====================
         print("Initializing the real robot .....................")
         self.timestep = 0
-        self.se = StateEstimator(lc)
+        self.se = StateEstimator(lc, use_gst=True)
 
         max_x_vel = self.command_x_range[1]
         max_y_vel = self.command_y_range[1]
@@ -282,12 +299,20 @@ class Go1Real(VecTask):
         self.obs_buf = torch.zeros(
             (self.num_envs, self.num_obs), device=self.device, dtype=torch.float
         )
-        self.states_buf = torch.zeros(
-            (self.num_envs, self.num_states), device=self.device, dtype=torch.float
-        )
         self.actions = torch.zeros(
             (self.num_envs, self.num_actions), device=self.device, dtype=torch.float
         )
+        self.states_buf = torch.zeros(
+            (self.num_envs, self.num_states), device=self.device, dtype=torch.float
+        )
+
+        if self.obs_privilige:
+            self.privilige_buffer = torch.zeros(
+                self.num_envs,
+                self.privilige_length,
+                device=self.device,
+                dtype=torch.float,
+            )
         self.rew_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
         self.reset_buf = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long
@@ -355,7 +380,9 @@ class Go1Real(VecTask):
         )
 
         if self.obs_history:
-            assert self.num_obs == 46, "total_obs_dim should be 46"
+            assert self.num_obs == 47, "total_obs_dim should be 46, got {}".format(
+                self.num_obs
+            )
             zero_obs = torch.zeros(
                 self.num_obs, dtype=torch.float32, device=self.device
             )
@@ -490,6 +517,11 @@ class Go1Real(VecTask):
                 self.history_buffer, -self.clip_obs, self.clip_obs
             ).to(self.rl_device)
 
+        if self.obs_privilige:
+            self.obs_dict["obs"]["state_privilige"] = self.privilige_buffer.to(
+                self.rl_device
+            )
+
         return (
             self.obs_dict,
             self.rew_buf.to(self.rl_device),
@@ -564,8 +596,8 @@ class Go1Real(VecTask):
     def compute_observations(self):
         obs = self.agents["hardware_closed_loop"].get_obs()
 
-        self.noise = self.agents["hardware_closed_loop"].get_extra_observations()
-        self.draw_bar(self.noise)
+        # self.noise = self.agents["hardware_closed_loop"].get_extra_observations()
+        # self.draw_bar(self.noise)
         gravity_vec = obs[:, 0:3]
         commands = obs[:, 3:6]
 
@@ -595,18 +627,40 @@ class Go1Real(VecTask):
             device=commands.device,
         )
 
+        result = self.se.get_gst_frame_result()
+        r = list(result)[0]
+        boxes = r.boxes.xyxyn
+        confidences = r.boxes.conf
+        # pick the box with highest confidence higher than 0.5
+
+        # im_array = r.plot()  # plot a BGR numpy array of predictions
+        # cv2.imshow("result", im_array)
+        # cv2.waitKey(1)
+        valid_indices = (confidences > 0.5).nonzero()
+        pixel_bbox_ball = torch.zeros(
+            self.num_envs, 4, dtype=torch.float, device=self.device
+        )
+        if valid_indices.size(0) > 0:
+            _, max_index = torch.max(confidences[valid_indices], dim=0)
+
+            # Get the corresponding box from the valid indices
+            pixel_bbox_ball[0, :] = boxes[valid_indices[max_index]]
+
+        print("=== pixel_bbox_ball: ", pixel_bbox_ball)
+
         obs = torch.cat(
             (
                 # base_lin_vel,
                 # base_ang_vel,
                 projected_gravity,
-                commands_scaled,
+                # commands_scaled,
                 dof_pos_scaled,
                 dof_vel_scaled,
                 self.actions,
-                self.clock_inputs
+                self.clock_inputs,
                 # self.actions,
                 # contact_states
+                pixel_bbox_ball,
             ),
             dim=-1,
         )
@@ -660,7 +714,6 @@ class Go1Real(VecTask):
             (self.num_envs, 4), device=self.device, dtype=torch.float
         )
         if self.obs_history:
-            assert self.num_obs == 46, "total_obs_dim should be 43"
             zero_obs = torch.zeros(
                 self.num_obs, dtype=torch.float32, device=self.device
             )
@@ -684,6 +737,11 @@ class Go1Real(VecTask):
             self.obs_dict["obs"]["state_history"] = torch.clamp(
                 self.history_buffer, -self.clip_obs, self.clip_obs
             ).to(self.rl_device)
+
+        if self.obs_privilige:
+            self.obs_dict["obs"]["state_privilige"] = self.privilige_buffer.to(
+                self.rl_device
+            )
 
         # asymmetric actor-critic
         if self.num_states > 0:

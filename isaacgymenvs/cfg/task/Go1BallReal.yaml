@@ -1,0 +1,141 @@
+# used to create the object
+name: Go1BallReal
+
+physics_engine: ${..physics_engine}
+
+env:
+  numEnvs: 1
+  envSpacing: 2. # [m]
+
+  obs_history: true
+  history_length: 15
+
+  action_lag_step: 0
+
+  observe_contact_states: false
+
+  obs_num:
+    # base_v: 3
+    # base_w: 3
+    gravity: 3
+    # command: 3
+    dof_p: 12
+    dof_v: 12
+    pre_act: 12
+    gait_sin_indict: 4
+    # contact_state: 4
+
+    # ball_states_p: 3
+    # goal_pose: 3
+    # ball_2d_close: 2
+
+    pixel_bbox_ball: 4
+    # pixel_bbox_goal: 4
+
+  gait_condition:
+    # trotting [0.5,0,0] pacing [0,0,0.5] jumping [0,0,0]
+    phases: 0.5
+    offsets: 0.0
+    bounds: 0.0
+    kappa: 0.07
+    duration: 0.5 # for stance phase
+    frequency: 3.0
+
+  obs_privilege: true
+  empty_privilege: true
+  priviledgeStates:
+    base_lin_vel: 3
+    base_ang_vel: 3
+
+    ball_states_v: 3
+    ball_states_p: 3
+    # goal_pose: 3
+
+    base_quat: 4
+    ball_event: 1
+    # total: 3 + 3 + 3 + 3 + 4 + 1 = 17
+
+  make_sound_dataset: false
+  sound_dataset_dir: "./dataset/"
+
+
+  act_num: 12
+
+  clipObservations: 5.0
+  clipActions: 1.0
+
+  plane:
+    staticFriction: 1.0 # [-]
+    dynamicFriction: 1.0 # [-]
+    restitution: 0. # [-]
+
+  baseInitState:
+    pos: [0.0, 0.0, 0.30] # x,y,z [m]
+    rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
+    vLinear: [0.0, 0.0, 0.0] # x,y,z [m/s]
+    vAngular: [0.0, 0.0, 0.0] # x,y,z [rad/s]
+
+  randomCommandVelocityRanges:
+    linear_x: [-1.0, 1.0] # min max [m/s]
+    num_bins_x: 1 # 20
+    linear_y: [-0.5, 0.5] # min max [m/s]
+    num_bins_y: 1 # 20
+    yaw: [-2.0, 2.0] # min max [rad/s]
+    num_bins_yaw: 1 # 5
+
+  control:
+    type: "pose_pd" # pose_pd / actuator_net
+    # PD Drive parameters:
+    stiffness: 20.0 # [N*m/rad]
+    damping: 0.5 # [N*m*s/rad]
+    actionScale: 0.5
+    controlFrequencyInv: 1 # 60 Hz
+    hipAddtionalScale: 0.5
+    # todo: change to a1 param?
+
+  defaultJointAngles: # = target angles when action = 0.0
+    FL_hip_joint: 0.1 # [rad]
+    RL_hip_joint: 0.1 # [rad]
+    FR_hip_joint: -0.1 # [rad]
+    RR_hip_joint: -0.1 # [rad]
+
+    FL_thigh_joint: 0.8 # [rad]
+    RL_thigh_joint: 1. # [rad]
+    FR_thigh_joint: 0.8 # [rad]
+    RR_thigh_joint: 1. # [rad]
+
+    FL_calf_joint: -1.5 # [rad]
+    RL_calf_joint: -1.5 # [rad]
+    FR_calf_joint: -1.5 # [rad]
+    RR_calf_joint: -1.5 # [rad]
+
+  learn:
+    # normalization
+    linearVelocityScale: 0.5
+    angularVelocityScale: 0.25
+    dofPositionScale: 1.0
+    dofVelocityScale: 0.05
+
+    # episode length in seconds
+    episodeLength_s: 5
+
+sim:
+  dt: 0.02
+  substeps: 2
+  up_axis: "z"
+  use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
+  gravity: [0.0, 0.0, -9.81]
+  physx:
+    num_threads: ${....num_threads}
+    solver_type: ${....solver_type}
+    use_gpu: ${contains:"cuda",${....sim_device}} # set to False to run on CPU
+    num_position_iterations: 4
+    num_velocity_iterations: 1
+    contact_offset: 0.02
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 100.0
+    default_buffer_size_multiplier: 5.0
+    max_gpu_contact_pairs: 8388608 # 8*1024*1024
+    num_subscenes: ${....num_subscenes}
+    contact_collection: 1 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (broken - do not use!)

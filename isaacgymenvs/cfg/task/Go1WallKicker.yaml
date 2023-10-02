@@ -7,7 +7,7 @@ env:
   numEnvs: ${resolve_default:32000,${...num_envs}}
   envSpacing: 2. # [m]
 
-  cameraSensorPlt: false
+  cameraSensorPlt: true
 
   obs_history: true
   history_length: 15
@@ -54,6 +54,7 @@ env:
     # bot_cam_pose: [0.25, 0.0, -0.1]
 
   obs_privilege: true
+  empty_privilege: true
   priviledgeStates:
     base_lin_vel: 3
     base_ang_vel: 3
@@ -64,6 +65,7 @@ env:
 
     base_quat: 4
     ball_event: 1
+    # total: 3 + 3 + 3 + 3 + 4 + 1 = 17
 
 
   actions_num: 12

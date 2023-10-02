@@ -16,6 +16,7 @@ from isaacgymenvs.go1_deploy.lcm_types.camera_message_lcmt import camera_message
 from isaacgymenvs.go1_deploy.lcm_types.camera_message_rect_wide import (
     camera_message_rect_wide,
 )
+from isaacgymenvs.go1_deploy.utils.gst_receiver import Video
 
 
 def get_rpy_from_quaternion(q):
@@ -52,7 +53,7 @@ def get_rotation_matrix_from_rpy(rpy):
 
 
 class StateEstimator:
-    def __init__(self, lc, use_cameras=True):
+    def __init__(self, lc, use_cameras=True, use_gst=False):
         # reverse legs
         self.joint_idxs = [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]
         self.contact_idxs = [1, 0, 3, 2]
@@ -130,6 +131,23 @@ class StateEstimator:
                 self.camera_subscription = self.lc.subscribe(
                     f"rect_image_{cam_name}", self._rect_camera_cb
                 )
+
+        if use_gst:
+            self.gst_video = Video()
+            print("Initialising stream...")
+            waited = 0
+            while not self.gst_video.frame_available():
+                waited += 1
+                print(
+                    "\r  Frame not available, need to wait 10 second (x{})".format(
+                        waited
+                    ),
+                    end="",
+                )
+                time.sleep(1)
+            print("\nSuccess!\nStarting streaming - ")
+            self.gst_video.frame()
+
         self.camera_image_left = None
         self.camera_image_right = None
         self.camera_image_front = None
@@ -321,6 +339,9 @@ class StateEstimator:
     def get_camera_right(self):
         return self.camera_image_right
 
+    def get_camera_gst(self):
+        return self.gst_video.frame()
+
     def _legdata_cb(self, channel, data):
         # print("update legdata")
         if not self.received_first_legdata:
@@ -479,6 +500,12 @@ class StateEstimator:
             self.camera_image_rear = img
         else:
             print("Image received from camera with unknown ID#!")
+
+    def get_gst_frame(self):
+        return self.gst_video.frame()
+
+    def get_gst_frame_result(self):
+        return self.gst_video.dectection_result()
 
     def poll(self, cb=None):
         t = time.time()

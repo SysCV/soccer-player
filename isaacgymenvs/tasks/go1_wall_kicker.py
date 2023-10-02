@@ -1036,9 +1036,7 @@ class Go1WallKicker(VecTask):
                 # print("=== pixel ball bbox:",pixel_bbox_ball)
 
                 # bboxes_goal = quadric_utils.calc_projected_bbox(self.goal_qstar_element, base_quat, base_pose, self.K_torch, goal_pose)
-                pixel_bbox_goal = quadric_utils.convert_bbox_to_img_coord(
-                    self.bboxes_goal, self.image_width, self.image_height
-                )
+
                 # print("=== goal bbox:",bboxes_goal)
                 # print("=== pixel goal bbox:",pixel_bbox_goal)
 
@@ -1054,14 +1052,18 @@ class Go1WallKicker(VecTask):
                     pixel_bbox_ball[self.num_envs - 1, 2].item(),
                     pixel_bbox_ball[self.num_envs - 1, 3].item(),
                 )
-                cam_img = quadric_utils.add_bbox_on_numpy_img(
-                    cam_img,
-                    pixel_bbox_goal[self.num_envs - 1, 0].item(),
-                    pixel_bbox_goal[self.num_envs - 1, 1].item(),
-                    pixel_bbox_goal[self.num_envs - 1, 2].item(),
-                    pixel_bbox_goal[self.num_envs - 1, 3].item(),
-                    box_color=(0, 255, 0),
-                )
+
+                # pixel_bbox_goal = quadric_utils.convert_bbox_to_img_coord(
+                #     self.bboxes_goal, self.image_width, self.image_height
+                # )
+                # cam_img = quadric_utils.add_bbox_on_numpy_img(
+                #     cam_img,
+                #     pixel_bbox_goal[self.num_envs - 1, 0].item(),
+                #     pixel_bbox_goal[self.num_envs - 1, 1].item(),
+                #     pixel_bbox_goal[self.num_envs - 1, 2].item(),
+                #     pixel_bbox_goal[self.num_envs - 1, 3].item(),
+                #     box_color=(0, 255, 0),
+                # )
 
                 self.ax.imshow(cam_img)
                 plt.draw()
@@ -1290,7 +1292,10 @@ class Go1WallKicker(VecTask):
             )
 
             pixel_bbox_ball = quadric_utils.convert_bbox_to_01(
-                self.bboxes_ball, self.image_width, self.image_height
+                self.bboxes_ball,
+                self.image_width,
+                self.image_height,
+                size_tolerance=1,
             )
 
             if "pixel_bbox_ball" in self.cfg["env"]["state_observations"]:
@@ -1311,7 +1316,7 @@ class Go1WallKicker(VecTask):
             pixel_bbox_goal = quadric_utils.convert_bbox_to_01(
                 self.bboxes_ball, self.image_width, self.image_height
             )
-            if "pixel_bbox_ball" in self.cfg["env"]["state_observations"]:
+            if "pixel_bbox_goal" in self.cfg["env"]["state_observations"]:
                 cat_list.append(pixel_bbox_goal)
 
         if "goal_pose" in self.cfg["env"]["state_observations"]:
@@ -1354,7 +1359,8 @@ class Go1WallKicker(VecTask):
             if "ball_event" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.is_back.unsqueeze(1).to(torch.float32))
 
-            self.privilige_buffer[:] = torch.cat(priv_list, dim=-1)
+            if not self.cfg["env"]["empty_privilege"]:
+                self.privilige_buffer[:] = torch.cat(priv_list, dim=-1)
 
     def _prepare_reward_function(self):
         """Prepares a list of reward functions, which will be called to compute the total reward.

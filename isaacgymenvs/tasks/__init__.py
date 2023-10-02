@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from .go1_ball_real import BallReal
 from .go1real import Go1Real
 from .go1 import Go1
 from .go1_ball_shoot import Go1BallShoot
@@ -94,6 +95,7 @@ def resolve_allegro_kuka_two_arms(cfg, *args, **kwargs):
 
 # Mappings from strings to environments
 isaacgym_task_map = {
+    "Go1BallReal": BallReal,
     "Go1Real": Go1Real,
     "Go1": Go1,
     "Go1Fix": Go1,
