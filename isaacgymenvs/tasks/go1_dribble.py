@@ -176,14 +176,6 @@ class Go1WallKicker(VecTask):
         self.ball_mass = self.cfg["env"]["ballInitState"]["mass"]
         self.ball_rand_pos_range = self.cfg["env"]["ballInitState"]["randomPosRange"]
 
-        # goal params
-        self.goal_init_pos = self.cfg["env"]["goalInitState"]["pos"]
-        self.goal_rand_pos_range = self.cfg["env"]["goalInitState"]["randomPosRange"]
-
-        # wall params
-        self.wall_init_pos = self.cfg["env"]["wallInitState"]["pos"]
-        self.wall_rand_pos_range = self.cfg["env"]["wallInitState"]["randomPosRange"]
-
         # default joint positions
         self.named_default_joint_angles = self.cfg["env"]["defaultJointAngles"]
 
