@@ -513,6 +513,9 @@ class Go1(VecTask):
         self.dof_stiff_rand_params = torch.zeros(
             self.num_envs, self.num_dof, device=self.device, dtype=torch.float
         )
+        self.dof_calib_rand_params = torch.zeros(
+            self.num_envs, self.num_dof, device=self.device, dtype=torch.float
+        )
         self.dof_damping_rand_params = torch.zeros(
             self.num_envs, self.num_dof, device=self.device, dtype=torch.float
         )
@@ -659,10 +662,42 @@ class Go1(VecTask):
 
         self.payload_rand_params = torch.rand((self.num_envs, 1), device=self.device)
         self.com_rand_params = torch.rand((self.num_envs, 3), device=self.device)
+        self.friction_rand_params = torch.rand((self.num_envs, 4), device=self.device)
+        self.restitution_rand_params = torch.rand(
+            (self.num_envs, 4), device=self.device
+        )
+        rigid_shape_props = self.gym.get_asset_rigid_shape_properties(a1)
 
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
+
+            # shape randomization first
+
+            for s in range(4):  # four legs and feets
+                for b in range(4):  # four bodies each side
+                    rigid_shape_props[1 + 4 * s + b].restitution = (
+                        self.cfg["env"]["random_params"]["restitution"]["range_low"]
+                        + (
+                            self.cfg["env"]["random_params"]["restitution"][
+                                "range_high"
+                            ]
+                            - self.cfg["env"]["random_params"]["restitution"][
+                                "range_low"
+                            ]
+                        )
+                        * self.restitution_rand_params[i, s].item()
+                    )
+                    rigid_shape_props[1 + 4 * s + b].friction = (
+                        self.cfg["env"]["random_params"]["friction"]["range_low"]
+                        + (
+                            self.cfg["env"]["random_params"]["friction"]["range_high"]
+                            - self.cfg["env"]["random_params"]["friction"]["range_low"]
+                        )
+                        * self.friction_rand_params[i, s].item()
+                    )
+
+            self.gym.set_asset_rigid_shape_properties(a1, rigid_shape_props)
 
             a1_handle = self.gym.create_actor(env_ptr, a1, start_pose, "a1", i, 0, 0)
             if i == 0:
@@ -732,9 +767,9 @@ class Go1(VecTask):
         self.base_index = self.gym.find_actor_rigid_body_handle(
             self.envs[0], self.a1_handles[0], "base"
         )
-        self.default_mass = self.gym.get_actor_rigid_body_properties(
-            self.envs[0], self.a1_handles[0]
-        )[self.base_index].mass
+        # self.default_mass = self.gym.get_actor_rigid_body_properties(
+        #     self.envs[0], self.a1_handles[0]
+        # )[self.base_index].mass
 
     def pre_physics_step(self, actions):
         self.last_last_targets = self.last_targets.clone()
@@ -747,7 +782,18 @@ class Go1(VecTask):
         actions_scaled[:, [0, 3, 6, 9]] *= self.hip_addtional_scale
 
         self.lag_buffer = self.lag_buffer[1:] + [actions_scaled.clone().to(self.device)]
-        self.targets = self.lag_buffer[0] + self.default_dof_pos
+        self.targets = (
+            self.lag_buffer[0]
+            + self.default_dof_pos
+            + (
+                self.cfg["env"]["random_params"]["dof_calib"]["range_low"]
+                + (
+                    self.cfg["env"]["random_params"]["dof_calib"]["range_high"]
+                    - self.cfg["env"]["random_params"]["dof_calib"]["range_low"]
+                )
+                * self.dof_calib_rand_params
+            )
+        )
 
         self.gym.set_dof_position_target_tensor(
             self.sim, gymtorch.unwrap_tensor(self.targets)
@@ -878,7 +924,7 @@ class Go1(VecTask):
         self.compute_observations()
 
         if self.do_rand and self.step_counter % self.random_frec == 0:
-            self.randomize_props()
+            self.randomize_dof_props()
         self.step_counter += 1
 
     def _push_robots(self, env_ids):
@@ -1010,6 +1056,7 @@ class Go1(VecTask):
                     self.base_ang_vel * ang_vel_scale,
                     self.dof_stiff_rand_params,
                     self.dof_damping_rand_params,
+                    # self.dof_calib_rand_params,
                     self.payload_rand_params,
                     # self.friction_rand_params,
                     self.com_rand_params,
@@ -1072,7 +1119,7 @@ class Go1(VecTask):
 
         self.reset_buf[:] = reset
 
-    def randomize_props(self):
+    def randomize_dof_props(self):
         print("=== randomize properties of the environment")
         self.dof_stiff_rand_params = torch.rand(
             (self.num_envs, self.num_dof), device=self.device
@@ -1080,10 +1127,8 @@ class Go1(VecTask):
         self.dof_damping_rand_params = torch.rand(
             (self.num_envs, self.num_dof), device=self.device
         )
-
-        # self.friction_rand_params = torch.rand((self.num_envs, 4), device=self.device)
-        self.restitution_rand_params = torch.rand(
-            (self.num_envs, 4), device=self.device
+        self.dof_calib_rand_params = torch.rand(
+            (self.num_envs, self.num_dof), device=self.device
         )
 
         for i in range(self.num_envs):
@@ -1110,29 +1155,6 @@ class Go1(VecTask):
                     * self.dof_damping_rand_params[i, s].item()
                 )
             self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
-
-            # Shape
-            shape_props_list = self.gym.get_actor_rigid_shape_properties(
-                env_handle, actor_handle
-            )
-            for s in range(4):  # four legs and feets
-                for b in range(4):  # four bodies each side
-                    shape_props_list[1 + 4 * s + b].restitution = (
-                        self.cfg["env"]["random_params"]["restitution"]["range_low"]
-                        + (
-                            self.cfg["env"]["random_params"]["restitution"][
-                                "range_high"
-                            ]
-                            - self.cfg["env"]["random_params"]["restitution"][
-                                "range_low"
-                            ]
-                        )
-                        * self.restitution_rand_params[i, s].item()
-                    )
-
-            self.gym.set_actor_rigid_shape_properties(
-                env_handle, actor_handle, shape_props_list
-            )
 
     def resample_commands(self, env_ids):
         old_bins = self.env_command_bins[env_ids]

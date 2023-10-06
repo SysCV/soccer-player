@@ -7,7 +7,7 @@ env:
   numEnvs: ${resolve_default:32000,${...num_envs}}
   envSpacing: 2. # [m]
 
-  cameraSensorPlt: true
+  cameraSensorPlt: false
 
   obs_history: true
   history_length: 15
@@ -36,7 +36,7 @@ env:
     # ball_2d_close: 2
 
     pixel_bbox_ball: 4
-    # pixel_bbox_goal: 4
+    pixel_bbox_goal: 4
 
     # base_lin_vel: 3
     # base_ang_vel: 3
@@ -46,22 +46,23 @@ env:
 
   pixel_observations:
     enable: false
-    height: 224
-    width: 224
+    height: 360
+    width: 360
     cam_range: 110
     history: 1
     head_cam_pose: [0.3, 0.0, 0.0]
+    cam_heading_rad: 0.0
     # bot_cam_pose: [0.25, 0.0, -0.1]
 
   obs_privilege: true
-  empty_privilege: true
+  empty_privilege: false
   priviledgeStates:
     base_lin_vel: 3
     base_ang_vel: 3
 
     ball_states_v: 3
     ball_states_p: 3
-    # goal_pose: 3
+    goal_pose: 3
 
     base_quat: 4
     ball_event: 1
@@ -94,7 +95,7 @@ env:
 
   goalInitState:
     pos: [3.0, 0.0, 0.15] # x,y,z [m]
-    randomPosRange: [0.0, 0.0, 0.0]
+    randomPosRange: [0.0, 2.0, 0.0]
 
   wallInitState:
     pos: [3.01, 0.0, 0.5] # x,y,z [m]
@@ -102,7 +103,7 @@ env:
 
   ballInitState:
     pos: [0.30, 0.0, 0.11] # x,y,z [m]
-    randomPosRange: [0.1, 0.5, 0.0]
+    randomPosRange: [0.3, 0.5, 0.0]
     # ballInitSpeed: -1.0 # [m/s]
     mass: 0.4 # [kg]
 

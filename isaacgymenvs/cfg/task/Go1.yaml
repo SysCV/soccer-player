@@ -61,6 +61,7 @@ env:
     base_w: 3
     dof_stiff: 12
     dof_damp: 12
+    # dof_calib: 12
     payload: 1
     com: 3
     # friction: 4
@@ -75,7 +76,7 @@ env:
     staticFriction: 0.0 # [-] # because we can't change the friction of the robot, and the friction of the contact pair is the mean of the two
     dynamicFriction: 0.0 # [-]
 
-    restitution: 0.0 # [-]
+    restitution: 0.01 # [-]
 
   baseInitState:
     pos: [0.0, 0.0, 0.35] # x,y,z [m]
@@ -106,6 +107,10 @@ env:
     controlFrequencyInv: 1 # control step every dt
 
   random_params:
+    dof_calib:
+      enable: true
+      range_low: -0.02
+      range_high: 0.02
     stiffness:
       enable: true
       range_low: 19.
@@ -115,13 +120,13 @@ env:
       range_low: 0.45
       range_high: 0.55
     friction:
-      enable: false
-      range_low: 0.1
-      range_high: 4.0
+      enable: true
+      range_low: 0.4
+      range_high: 2.0
     restitution:
       enable: true
       range_low: 0.0
-      range_high: 0.5
+      range_high: 2.0
     com:
       enable: true
       range_low: -0.15

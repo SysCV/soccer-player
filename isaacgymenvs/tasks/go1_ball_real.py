@@ -397,9 +397,22 @@ class BallReal(VecTask):
 
     def calibrate(self, wait=True, low=False, save=False):
         # first, if the robot is not in nominal pose, move slowly to the nominal pose
+
         print("Calibrating the robot to stand pose!!!!")
         if hasattr(self.agents["hardware_closed_loop"], "get_obs"):
             agent = self.agents["hardware_closed_loop"]
+
+            print(f"wait for the first lcm message [Press R2 after the message]")
+            while wait:
+                agent.get_obs()
+                self.button_states = self.command_profile.get_buttons()
+                if (
+                    self.command_profile.state_estimator.right_lower_right_switch_pressed
+                ):
+                    self.command_profile.state_estimator.right_lower_right_switch_pressed = (
+                        False
+                    )
+                    break
             agent.get_obs()
             joint_pos = agent.dof_pos
             if low:
@@ -438,7 +451,7 @@ class BallReal(VecTask):
             target_sequence = []
             target = joint_pos - nominal_joint_pos
             while np.max(np.abs(target - final_goal)) > 0.01:
-                target -= np.clip((target - final_goal), -0.02, 0.02)
+                target -= np.clip((target - final_goal), -0.05, 0.05)
                 target_sequence += [copy.deepcopy(target)]
             for target in target_sequence:
                 next_target = target
@@ -451,7 +464,7 @@ class BallReal(VecTask):
                 cal_action[:, 0:12] = next_target
                 agent.step_once(torch.from_numpy(cal_action))
                 agent.get_obs()
-                time.sleep(0.1)
+                time.sleep(0.05)
 
             print("Starting pose calibrated [Press R2 to start controller]")
             self.reset_gait_indices()
@@ -633,11 +646,12 @@ class BallReal(VecTask):
         confidences = r.boxes.conf
         # pick the box with highest confidence higher than 0.5
 
-        # im_array = r.plot()  # plot a BGR numpy array of predictions
-        # cv2.imshow("result", im_array)
-        # cv2.waitKey(1)
+        im_array = r.plot()  # plot a BGR numpy array of predictions
+        cv2.imshow("result", im_array)
+        cv2.waitKey(1)
+
         valid_indices = (confidences > 0.5).nonzero()
-        pixel_bbox_ball = torch.zeros(
+        pixel_bbox_ball = -0.0028 * torch.ones(
             self.num_envs, 4, dtype=torch.float, device=self.device
         )
         if valid_indices.size(0) > 0:

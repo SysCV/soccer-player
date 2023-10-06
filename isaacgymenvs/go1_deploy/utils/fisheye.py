@@ -5,7 +5,7 @@ import time
 
 
 class Converter:
-    def __init__(self, width=928, height=800, pinhole_width=640, fov=110):
+    def __init__(self, width=928, height=800, pinhole_width=640, fov=110, rot_X=0.0):
         self.width = width
         self.height = height
         self.pinhole_width = pinhole_width
@@ -17,7 +17,7 @@ class Converter:
             (self.equirectHeight, self.equirectWidth, 3), dtype=np.uint8
         )
 
-        self.output_FOV = 110.0
+        self.output_FOV = self.fov
         self.output_focal_length = (
             0.5 * self.equirectWidth / math.tan(self.output_FOV * math.pi / 180 / 2)
         )
@@ -47,7 +47,7 @@ class Converter:
         self.mapX, self.mapY = cv2.fisheye.initUndistortRectifyMap(
             self.input_K,
             self.input_D,
-            np.array([0.6, 0.0, 0.0]),
+            np.array([rot_X, 0.0, 0.0]),
             self.output_K,
             (self.equirectWidth, self.equirectHeight),
             cv2.CV_32FC1,

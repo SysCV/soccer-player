@@ -188,7 +188,7 @@ class Video:
     def dectection_result(self):
         pinhole_frame = self.converter.fish_to_pinhole(self.frame())
         result = self.model.predict(
-            pinhole_frame, show=False, stream=True, device="cuda:1", verbose=False
+            pinhole_frame, show=False, stream=True, device="cuda:0", verbose=False
         )
         return result
 
@@ -263,10 +263,11 @@ if __name__ == "__main__":
                     # Only retrieve and display a frame if it's new
                     frame = video.frame()
                     # Convert fisheye to equirectangular
-                    # pinhole_frame = convert.fish_to_pinhole(frame)
+
                     cv2.imshow("origin", frame)
 
                     # Display the frame
+                    # pinhole_frame = convert.fish_to_pinhole(frame)
                     # cv2.imshow("frame", pinhole_frame)
 
                     results = video.dectection_result()

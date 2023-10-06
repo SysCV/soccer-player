@@ -8,7 +8,7 @@ import isaacgymenvs.utils.torch_jit_utils as torch_jit_utils
 
 
 def calc_projected_bbox(
-    dual_element, Quatw_root, pw_root, K, pw_ball, proot_cam, facing_down=False
+    dual_element, Quatw_root, pw_root, K, pw_ball, proot_cam, facing_R
 ):
     """
     dual_balls: (B, 4, 4) \\
@@ -39,19 +39,7 @@ def calc_projected_bbox(
 
     Q_w = torch.matmul(Tw_ball, torch.matmul(dual_element, Tw_ball.transpose(-1, -2)))
 
-    if facing_down:
-        Rr_c = torch.tensor(
-            [[0, -1, 0], [-1, 0, 0], [0, 0, -1]],
-            dtype=torch.float32,
-            device=pw_ball.device,
-        )  # rot the cam in root place to make z axis the front axis
-    else:
-        Rr_c = torch.tensor(
-            [[0, 0, 1], [-1, 0, 0], [0, -1, 0]],
-            dtype=torch.float32,
-            device=pw_ball.device,
-        )  # rot the cam in root place to make z axis the front axis
-    Tr_c = torch.cat([Rr_c, proot_cam.unsqueeze(-1)], dim=-1)
+    Tr_c = torch.cat([facing_R, proot_cam.unsqueeze(-1)], dim=-1)
     Tr_c = torch.cat(
         [Tr_c, torch.tensor([0, 0, 0, 1], device=Tr_c.device).unsqueeze(0)], dim=-2
     )
@@ -165,25 +153,40 @@ def quaternions_to_rotation_matrices(quaternions):
 def add_bbox_on_numpy_img(
     img, xmin, ymin, xmax, ymax, box_color=(255, 255, 255), line_thickness=2
 ):
-    img[ymin:ymax, xmin : xmin + line_thickness] = box_color
-    img[ymin:ymax, xmax - line_thickness : xmax] = box_color
-    img[ymin : ymin + line_thickness, xmin:xmax] = box_color
-    img[ymax - line_thickness : ymax, xmin:xmax] = box_color
+    if xmin < 0 or ymin < 0 or xmax > img.shape[1] or ymax > img.shape[0]:
+        return img
+    else:
+        img[ymin:ymax, xmin : xmin + line_thickness] = box_color
+        img[ymin:ymax, xmax - line_thickness : xmax] = box_color
+        img[ymin : ymin + line_thickness, xmin:xmax] = box_color
+        img[ymax - line_thickness : ymax, xmin:xmax] = box_color
     return img
 
 
-def convert_bbox_to_img_coord(xy_minmax, image_width, image_height, size_tolerance=0):
+def convert_bbox_to_int_index(
+    xy_minmax, image_width, image_height, size_tolerance=0, edge_tolerance=1
+):
     pixel_bbox = torch.zeros_like(xy_minmax, dtype=torch.int32)
     # in order xmin, ymin, xmax, ymax
-    pixel_bbox[:, [0, 2]] = torch.clamp(
-        xy_minmax[:, [0, 2]].to(torch.int32), min=0, max=image_width - 1
-    )
-    pixel_bbox[:, [1, 3]] = torch.clamp(
-        xy_minmax[:, [1, 3]].to(torch.int32), min=0, max=image_height - 1
-    )
+    # pixel_bbox[:, [0, 2]] = torch.clamp(
+    #     xy_minmax[:, [0, 2]].to(torch.int32), min=-1, max=image_width - 1
+    # )
+    # pixel_bbox[:, [1, 3]] = torch.clamp(
+    #     xy_minmax[:, [1, 3]].to(torch.int32), min=-1, max=image_height - 1
+    # )
+
+    pixel_bbox[:, :] = xy_minmax[:, :].to(torch.int32)
 
     valid_box = ((pixel_bbox[:, 0] + size_tolerance) < pixel_bbox[:, 2]) & (
         (pixel_bbox[:, 1] + size_tolerance) < pixel_bbox[:, 3]
+    )
+
+    valid_box = (
+        valid_box
+        & (pixel_bbox[:, 0] > edge_tolerance)
+        & (pixel_bbox[:, 1] > edge_tolerance)
+        & (pixel_bbox[:, 2] < image_width - edge_tolerance - 1)
+        & (pixel_bbox[:, 3] < image_height - edge_tolerance - 1)
     )
 
     pixel_bbox[~valid_box, :] = 0
@@ -191,21 +194,31 @@ def convert_bbox_to_img_coord(xy_minmax, image_width, image_height, size_toleran
     return pixel_bbox
 
 
-def convert_bbox_to_01(xy_minmax, image_width, image_height, size_tolerance=0):
-    pixel_bbox = torch.zeros_like(xy_minmax, dtype=torch.float32)
-    # in order xmin, ymin, xmax, ymax
-    pixel_bbox[:, [0, 2]] = torch.clamp(
-        xy_minmax[:, [0, 2]], min=0, max=image_width - 1
-    )
-    pixel_bbox[:, [1, 3]] = torch.clamp(
-        xy_minmax[:, [1, 3]], min=0, max=image_height - 1
-    )
+def convert_bbox_to_01(
+    xy_minmax, image_width, image_height, size_tolerance=0, edge_tolerance=1
+):
+    pixel_bbox = xy_minmax.clone()
+    # # in order xmin, ymin, xmax, ymax
+    # pixel_bbox[:, [0, 2]] = torch.clamp(
+    #     xy_minmax[:, [0, 2]], min=0, max=image_width - 1
+    # )
+    # pixel_bbox[:, [1, 3]] = torch.clamp(
+    #     xy_minmax[:, [1, 3]], min=0, max=image_height - 1
+    # )
 
     valid_box = ((pixel_bbox[:, 0] + size_tolerance) < pixel_bbox[:, 2]) & (
         (pixel_bbox[:, 1] + size_tolerance) < pixel_bbox[:, 3]
     )
+    # bbox that close to image edge in also invalid
+    valid_box = (
+        valid_box
+        & (pixel_bbox[:, 0] > edge_tolerance)
+        & (pixel_bbox[:, 1] > edge_tolerance)
+        & (pixel_bbox[:, 2] < image_width - edge_tolerance - 1)
+        & (pixel_bbox[:, 3] < image_height - edge_tolerance - 1)
+    )
 
-    pixel_bbox[~valid_box, :] = 0.0
+    pixel_bbox[~valid_box, :] = -1.0
 
     pixel_bbox[:, [0, 2]] = pixel_bbox[:, [0, 2]] / (image_width - 1)
     pixel_bbox[:, [1, 3]] = pixel_bbox[:, [1, 3]] / (image_height - 1)

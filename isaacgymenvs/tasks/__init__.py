@@ -26,8 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .go1_ball_real import BallReal
-from .go1real import Go1Real
+
 from .go1 import Go1
 from .go1_ball_shoot import Go1BallShoot
 from .go1_wall_kicker import Go1WallKicker
@@ -95,8 +94,6 @@ def resolve_allegro_kuka_two_arms(cfg, *args, **kwargs):
 
 # Mappings from strings to environments
 isaacgym_task_map = {
-    "Go1BallReal": BallReal,
-    "Go1Real": Go1Real,
     "Go1": Go1,
     "Go1Fix": Go1,
     "Go1WallKicker": Go1WallKicker,
@@ -125,3 +122,16 @@ isaacgym_task_map = {
     "ShadowHand": ShadowHand,
     "Trifinger": Trifinger,
 }
+
+try:
+    from .go1_ball_real import BallReal
+    from .go1real import Go1Real
+except:
+    print("No real robot envs and packages installed")
+else:
+    isaacgym_task_map.update(
+        {
+            "Go1BallReal": BallReal,
+            "Go1Real": Go1Real,
+        }
+    )
