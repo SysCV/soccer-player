@@ -4,8 +4,11 @@ name: Go1Dribble
 physics_engine: ${..physics_engine}
 
 env:
-  numEnvs: ${resolve_default:32000,${...num_envs}}
+  numEnvs: ${resolve_default:4000,${...num_envs}}
   envSpacing: 2. # [m]
+
+  wandb_extra_log: true
+  wandb_extra_log_period: 8000
 
   cameraSensorPlt: false
 
@@ -56,25 +59,80 @@ env:
     ball_states_v: 3 # can be in world frame, because have yaw
     ball_states_p: 3
 
-    # total: 10
+    # total: 12
 
   actions_num: 12
 
-  terminateCondition:
-    robot_x_range: [-1.0, 1.5] # [m]
-    ball_x_range: [-1.0, 3.5] # [m]
-    ball_y_range: [-2, 2] # [m]
-    valid_catch_range: 0.35 # [m]
-    valid_hit_wall_range: 0.15 # [m]
-    min_speed: 0.3 # [m/s]
+  randomCommandVelocityRanges:
+    linear_x: [-1.5, 1.5] # min max [m/s]
+    linear_x_init: [-1.5, 1.5] # [-0.3, 0.3] # min max [m/s]
+    num_bins_x: 1 # 20
+
+    linear_y: [-1.5, 1.5] # min max [m/s]
+    linear_y_init: [-1.5, 1.5] # [-0.3, 0.3] # min max [m/s]
+    num_bins_y: 1 # 20
 
   clipObservations: 5.0
   clipActions: 1.0
 
+  random_params:
+    dof_calib:
+      enable: true
+      range_low: -0.02
+      range_high: 0.02
+    stiffness:
+      enable: true
+      range_low: 19.
+      range_high: 21.
+    damping:
+      enable: true
+      range_low: 0.45
+      range_high: 0.55
+    friction:
+      enable: true
+      range_low: 0.1
+      range_high: 1.5
+    restitution:
+      enable: true
+      range_low: 0.3
+      range_high: 1.3
+    com:
+      enable: true
+      range_low: -0.15
+      range_high: 0.15
+    payload:
+      enable: true
+      range_low: -1.0
+      range_high: 2.0
+    push:
+      enable: true
+      interval_s: 7
+      max_vel: 0.5
+    ball_mass:
+      enable: true
+      range_low: 0.3
+      range_high: 0.5
+    ball_restitution:
+      enable: true
+      range_low: 0.0
+      range_high: 1.0
+    ball_drag:
+      enable: true
+      range_low: -0.0
+      range_high: 0.8
+      interval_s: 9
+
+  randomization: true
+  randomization_freq: 10000 # 1s = 50 steps
+    
+
+  terminateCondition:
+    robot_ball_max: 100.0
+
   plane:
-    staticFriction: 0.6 # [-]
-    dynamicFriction: 0.6 # [-]
-    restitution: 0.4 # [-]
+    staticFriction: 0.0 # [-]
+    dynamicFriction: 0.0 # [-]
+    restitution: 0.01 # [-]
 
   baseInitState:
     pos: [0.0, 0.0, 0.33] # x,y,z [m]
@@ -83,8 +141,8 @@ env:
     vAngular: [0.0, 0.0, 0.0] # x,y,z [rad/s]
 
   ballInitState:
-    pos: [0.30, 0.0, 0.11] # x,y,z [m]
-    randomPosRange: [0.3, 0.5, 0.0]
+    pos: [0.0, 0.0, 0.11] # x,y,z [m]
+    randomPosRange: [1.5, 1.5, 0.0]
     # ballInitSpeed: -1.0 # [m/s]
     mass: 0.4 # [kg]
 
@@ -168,9 +226,14 @@ env:
     # episode length in seconds
     episodeLength_s: 20
 
-    # termination
-    maxInGroundLength_s: 20
-    maxStableLength_s: 3
+    curriculum:
+      resample_s: 5
+      success_threshold:
+        dribbling_ball_vel: 0.8
+        tracking_contacts_shaped_force: 0.9
+        tracking_contacts_shaped_vel: 0.9
+      local_range: [0.4, 0.4]
+
 
   # viewer cam:
   viewer:
@@ -195,7 +258,7 @@ sim:
     num_velocity_iterations: 1
     contact_offset: 0.02
     rest_offset: 0.0
-    bounce_threshold_velocity: 0.2
+    bounce_threshold_velocity: 0.1
     max_depenetration_velocity: 100.0
     default_buffer_size_multiplier: 5.0
     max_gpu_contact_pairs: 8388608 # 8*1024*1024

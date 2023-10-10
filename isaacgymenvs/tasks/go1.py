@@ -265,14 +265,14 @@ class Go1(VecTask):
             "success_threshold"
         ]
 
+        local_range = self.cfg["env"]["learn"]["curriculum"]["local_range"]
+        self.curri_local_range = torch.tensor(local_range, device=self.device)
+
         self.rand_push = self.cfg["env"]["random_params"]["push"]["enable"]
         self.rand_push_length = int(
             self.cfg["env"]["random_params"]["push"]["interval_s"] / self.dt + 0.5
         )
         self.max_push_vel = self.cfg["env"]["random_params"]["push"]["max_vel"]
-
-        local_range = self.cfg["env"]["learn"]["curriculum"]["local_range"]
-        self.curri_local_range = torch.tensor(local_range, device=self.device)
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]

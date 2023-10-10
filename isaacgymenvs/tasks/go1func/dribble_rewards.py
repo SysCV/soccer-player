@@ -123,8 +123,7 @@ class RewardTerms:
             dim=1,
         )
 
-        # encourage robot velocity align vector from robot body to ball
-
+    # encourage robot velocity align vector from robot body to ball
     # r_cv
     def _reward_dribbling_robot_ball_vel(self):
         FR_shoulder_idx = self.env.gym.find_actor_rigid_body_handle(
@@ -198,7 +197,10 @@ class RewardTerms:
             torch.square(self.env.commands[:, :2] - self.env.object_lin_vel[:, :2]),
             dim=1,
         )
-        # rew_dribbling_ball_vel = torch.exp(-lin_vel_error / (self.env.cfg.rewards.tracking_sigma*2))
+        # print(
+        #     "lin_vel_error: ",
+        #     lin_vel_error,
+        # )
         return torch.exp(
             -lin_vel_error / (self.env.reward_params["dribbling_ball_vel"]["sigma"] * 2)
         )
@@ -224,6 +226,9 @@ class RewardTerms:
         robot_ball_body_yaw_error = torch.norm(body_yaw_vec, dim=-1) - torch.sum(
             d_robot_ball * body_yaw_vec, dim=-1
         )
+        # print("====================================")
+        # print("robot_ball_cmd_yaw_error: ", robot_ball_cmd_yaw_error)
+        # print("robot_ball_body_yaw_error: ", robot_ball_body_yaw_error)
         delta_dribbling_robot_ball_cmd_yaw = 2.0
         rew_dribbling_robot_ball_yaw = torch.exp(
             -delta_dribbling_robot_ball_cmd_yaw
@@ -248,4 +253,5 @@ class RewardTerms:
         ) - torch.atan2(self.env.object_lin_vel[:, 1], self.env.object_lin_vel[:, 0])
         angle_diff_in_pi = torch.pow(wrap_to_pi(angle_diff), 2)
         rew_vel_angle_tracking = 1.0 - angle_diff_in_pi / (torch.pi**2)
+        # print("rew_vel_angle_tracking: ", rew_vel_angle_tracking)
         return rew_vel_angle_tracking

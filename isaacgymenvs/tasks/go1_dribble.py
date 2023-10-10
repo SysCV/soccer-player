@@ -30,6 +30,9 @@
 # Got 17 bodies, 16 joints, and 12 DOFs
 
 # Bodies:
+# ['base', 'trunk', 'FL_hip', 'FL_thigh_shoulder', 'FL_thigh', 'FL_calf', 'FL_foot', 'FR_hip', 'FR_thigh_shoulder', 'FR_thigh', 'FR_calf', 'FR_foot', 'RL_hip', 'RL_thigh_shoulder', 'RL_thigh', 'RL_calf', 'RL_foot', 'RR_hip', 'RR_thigh_shoulder', 'RR_thigh', 'RR_calf', 'RR_foot', 'imu_link']
+
+# Bodies:
 #   0: 'base'
 #   1: 'FL_hip'
 #   2: 'FL_thigh'
@@ -88,6 +91,8 @@ import matplotlib.pyplot as plt
 
 from gym import spaces
 
+import wandb
+
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym.torch_utils import *
@@ -95,6 +100,8 @@ from isaacgym import gymutil
 
 from isaacgymenvs.tasks.base.vec_task import VecTask
 import isaacgymenvs.tasks.go1func.quadric_utils as quadric_utils
+
+from isaacgymenvs.tasks.curricula.curriculum_torch import RewardThresholdCurriculum
 
 from isaacgymenvs.utils.torch_jit_utils import calc_heading
 
@@ -123,6 +130,10 @@ class Go1Dribbler(VecTask):
         self.success_episode = 0
 
         self.cfg = cfg
+
+        self.wandb_extra_log = self.cfg["env"]["wandb_extra_log"]
+        self.wandb_log_period = self.cfg["env"]["wandb_extra_log_period"]
+
         # cam pic
         self.have_cam_window = self.cfg["env"]["cameraSensorPlt"]
         self.pixel_obs = self.cfg["env"]["pixel_observations"]["enable"]
@@ -131,6 +142,9 @@ class Go1Dribbler(VecTask):
             _, self.ax = plt.subplots()
             plt.axis("off")
         self.add_real_ball = self.cfg["task"]["target_ball"]
+
+        self.do_rand = self.cfg["env"]["randomization"]
+        self.random_frec = self.cfg["env"]["randomization_freq"]
 
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
@@ -149,18 +163,7 @@ class Go1Dribbler(VecTask):
         self.reward_params = self.cfg["env"]["rewards"]["rewardParams"]
 
         # termination conditions
-        self.robot_x_range = self.cfg["env"]["terminateCondition"]["robot_x_range"]
-        self.ball_x_range = self.cfg["env"]["terminateCondition"]["ball_x_range"]
-        self.ball_y_range = self.cfg["env"]["terminateCondition"]["ball_y_range"]
-
-        # randomization
-        self.randomization_params = self.cfg["task"]["randomization_params"]
-        self.randomize = self.cfg["task"]["randomize"]
-
-        # command ranges
-        # self.command_x_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"]
-        # self.command_y_range = self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"]
-        # self.command_yaw_range = self.cfg["env"]["randomCommandVelocityRanges"]["yaw"]
+        self.robot_ball_max = self.cfg["env"]["terminateCondition"]["robot_ball_max"]
 
         # plane params
         self.plane_static_friction = self.cfg["env"]["plane"]["staticFriction"]
@@ -207,6 +210,10 @@ class Go1Dribbler(VecTask):
             self.privilige_length = privious_obs_dim
 
         self.cfg["env"]["numActions"] = self.cfg["env"]["actions_num"]
+
+        # randomization
+        self.randomization_params = self.cfg["task"]["randomization_params"]
+        self.randomize = self.cfg["task"]["randomize"]
 
         self.cam_range = self.cfg["env"]["pixel_observations"]["cam_range"]
         self.image_width = self.cfg["env"]["pixel_observations"]["width"]
@@ -286,10 +293,31 @@ class Go1Dribbler(VecTask):
         self.Kp = self.cfg["env"]["control"]["stiffness"]
         self.Kd = self.cfg["env"]["control"]["damping"]
 
+        self.rand_push = self.cfg["env"]["random_params"]["push"]["enable"]
+        self.rand_push_length = int(
+            self.cfg["env"]["random_params"]["push"]["interval_s"] / self.dt + 0.5
+        )
+        self.max_push_vel = self.cfg["env"]["random_params"]["push"]["max_vel"]
+
+        self.drag_ball = self.cfg["env"]["random_params"]["ball_drag"]["enable"]
+        self.drag_ball_rand_length = int(
+            self.cfg["env"]["random_params"]["ball_drag"]["interval_s"] / self.dt + 0.5
+        )
+
         self._prepare_reward_function()
 
         self.create_sim_monitor()
         self.create_self_buffers()
+
+        # curricula
+        self.command_s = self.cfg["env"]["learn"]["curriculum"]["resample_s"]
+        self.curri_resample_length = int(self.command_s / self.dt + 0.5)
+        self.curriculum_thresholds = self.cfg["env"]["learn"]["curriculum"][
+            "success_threshold"
+        ]
+        local_range = self.cfg["env"]["learn"]["curriculum"]["local_range"]
+        self.curri_local_range = torch.tensor(local_range, device=self.device)
+        self.init_curriculum()
 
         if self.viewer != None:
             p = self.cfg["env"]["viewer"]["pos"]
@@ -301,6 +329,51 @@ class Go1Dribbler(VecTask):
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
         self.set_actor_root_state_tensor_indexed()
         # print ("Go1WallKicker init done by gymenv!!")
+
+    def init_curriculum(self):
+        # init curriculum
+        self.curriculum = RewardThresholdCurriculum(
+            device=self.device,
+            x_vel=(
+                self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][0],
+                self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][1],
+                self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_x"],
+            ),
+            y_vel=(
+                self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][0],
+                self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][1],
+                self.cfg["env"]["randomCommandVelocityRanges"]["num_bins_y"],
+            ),
+        )
+
+        # print("init curriculum:")
+        # print(["env"]["randomCommandVelocityRanges"]["linear_x_init"][0])
+
+        low = torch.tensor(
+            [
+                self.cfg["env"]["randomCommandVelocityRanges"]["linear_x_init"][0],
+                self.cfg["env"]["randomCommandVelocityRanges"]["linear_y_init"][0],
+            ],
+            device=self.device,
+        )
+        high = torch.tensor(
+            [
+                self.cfg["env"]["randomCommandVelocityRanges"]["linear_x_init"][1],
+                self.cfg["env"]["randomCommandVelocityRanges"]["linear_y_init"][1],
+            ],
+            device=self.device,
+        )
+
+        self.curriculum.set_to(low, high)
+
+        # self.env_command_bins = np.zeros(self.num_envs, dtype=np.int)
+        new_commands, self.env_command_bins = self.curriculum.sample(self.num_envs)
+        self.commands = new_commands.to(self.device)
+
+        # setting the smaller commands to zero
+        self.commands[:, :2] *= (
+            torch.norm(self.commands[:, :2], dim=1) > 0.2
+        ).unsqueeze(1)
 
     def set_viewer(self):
         """Create the viewer."""
@@ -356,6 +429,7 @@ class Go1Dribbler(VecTask):
         # self.base_body_state = self.rigid_body_state.view(
         #     self.num_envs, (self.num_bodies + 1), 13
         # )[:, self.base_index, 0:8]
+
         self.foot_velocities = self.rigid_body_state.view(
             self.num_envs, (self.num_bodies + 1), 13
         )[:, self.feet_indices, 7:10]
@@ -393,6 +467,18 @@ class Go1Dribbler(VecTask):
     def create_self_buffers(self):
         # initialize some data used later on
         # the differce with monitor is that these are not wrapped gym-state tensors
+
+        self.step_counter = 0
+
+        self.ball_drags = torch.zeros(
+            self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False
+        )
+
+        self.force_tensor = torch.zeros(
+            (self.num_envs, self.num_bodies + 1, 3),
+            dtype=torch.float32,
+            device=self.device,
+        )
 
         self.forward_vec = to_torch([1.0, 0.0, 0.0], device=self.device).repeat(
             (self.num_envs, 1)
@@ -528,6 +614,10 @@ class Go1Dribbler(VecTask):
         )
         self.proot_cam_element = torch.tensor(self.head_cam_pose, device=self.device)
 
+        self.robot_ball_dis = torch.zeros(
+            self.num_envs, dtype=torch.float, device=self.device
+        )
+
     def create_sim(self):
         self.up_axis_idx = 2  # index of up axis: Y=1, Z=2
         self.sim = super().create_sim(
@@ -552,6 +642,34 @@ class Go1Dribbler(VecTask):
         plane_params.dynamic_friction = self.plane_dynamic_friction
         # plane_params.rolling_friction = 0.6
         self.gym.add_ground(self.sim, plane_params)
+
+    def prepare_rand_params(self):
+        self.dof_stiff_rand_params = torch.zeros(
+            self.num_envs, self.num_dof, device=self.device, dtype=torch.float
+        )
+        self.dof_calib_rand_params = torch.zeros(
+            self.num_envs, self.num_dof, device=self.device, dtype=torch.float
+        )
+        self.dof_damping_rand_params = torch.zeros(
+            self.num_envs, self.num_dof, device=self.device, dtype=torch.float
+        )
+        self.payload_rand_params = torch.zeros(
+            self.num_envs, 1, device=self.device, dtype=torch.float
+        )
+        self.friction_rand_params = torch.zeros(
+            self.num_envs, 4, device=self.device, dtype=torch.float
+        )
+        self.restitution_rand_params = torch.zeros(
+            self.num_envs, 4, device=self.device, dtype=torch.float
+        )
+        self.com_rand_params = torch.zeros(self.num_envs, 3, device=self.device)
+
+        self.ball_mass_rand_params = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.float
+        )
+        self.ball_restitution_rand_params = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.float
+        )
 
     def _create_envs(self, num_envs, spacing, num_per_row):
         asset_root = os.path.join(
@@ -583,6 +701,7 @@ class Go1Dribbler(VecTask):
         start_pose.p = gymapi.Vec3(*self.base_init_state[:3])
 
         body_names = self.gym.get_asset_rigid_body_names(a1)
+        print("=== body_names:", body_names)
         self.dof_names = self.gym.get_asset_dof_names(a1)
         # extremity_name = "SHANK" if asset_options.collapse_fixed_joints else "FOOT"
         extremity_name = "foot"
@@ -616,13 +735,22 @@ class Go1Dribbler(VecTask):
         asset_options.density = 0.1
         asset_ball = self.gym.create_sphere(self.sim, 0.1, asset_options)
 
+        # randomization params, here because some param can only be applied
+        # during set up
+
+        if self.do_rand:
+            self.prepare_rand_params()
+            self.sample_rand_params()
+
+            dog_rigid_shape_props = self.gym.get_asset_rigid_shape_properties(a1)
+            ball_rigid_shape_props = self.gym.get_asset_rigid_shape_properties(
+                asset_ball
+            )
+
         self.a1_handles = []
         self.envs = []
         if self.add_real_ball:
             self.ball_handles = []
-
-        self.goal_handles = []
-        self.wall_handles = []
 
         if self.pixel_obs or self.have_cam_window:
             self.camera_handles = []
@@ -633,11 +761,85 @@ class Go1Dribbler(VecTask):
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
-            a1_handle = self.gym.create_actor(
-                env_ptr, a1, start_pose, "a1", i, 0b010, 0
-            )
 
-            self.gym.set_actor_dof_properties(env_ptr, a1_handle, dof_props)
+            if self.do_rand:
+                for s in range(4):  # four legs and feets
+                    for b in range(4):  # 5 bodies each side
+                        dog_rigid_shape_props[1 + 4 * s + b].restitution = (
+                            self.cfg["env"]["random_params"]["restitution"]["range_low"]
+                            + (
+                                self.cfg["env"]["random_params"]["restitution"][
+                                    "range_high"
+                                ]
+                                - self.cfg["env"]["random_params"]["restitution"][
+                                    "range_low"
+                                ]
+                            )
+                            * self.restitution_rand_params[i, s].item()
+                        )
+                        dog_rigid_shape_props[1 + 4 * s + b].friction = (
+                            self.cfg["env"]["random_params"]["friction"]["range_low"]
+                            + (
+                                self.cfg["env"]["random_params"]["friction"][
+                                    "range_high"
+                                ]
+                                - self.cfg["env"]["random_params"]["friction"][
+                                    "range_low"
+                                ]
+                            )
+                            * self.friction_rand_params[i, s].item()
+                        )
+
+                self.gym.set_asset_rigid_shape_properties(a1, dog_rigid_shape_props)
+
+            a1_handle = self.gym.create_actor(env_ptr, a1, start_pose, "a1", i, 0, 0)
+
+            if self.do_rand:
+                if i == 0:
+                    self.default_mass = self.gym.get_actor_rigid_body_properties(
+                        env_ptr, a1_handle
+                    )[0].mass
+                # Rigid
+                rigid_props = self.gym.get_actor_rigid_body_properties(
+                    env_ptr, a1_handle
+                )
+                rigid_props[0].mass = (
+                    self.default_mass
+                    + self.payload_rand_params[i, 0].item()
+                    * (
+                        self.cfg["env"]["random_params"]["payload"]["range_high"]
+                        - self.cfg["env"]["random_params"]["payload"]["range_low"]
+                    )
+                    + self.cfg["env"]["random_params"]["payload"]["range_low"]
+                )
+                rigid_props[0].com = gymapi.Vec3(0.0, 0.0, 0)
+                rigid_props[0].com = gymapi.Vec3(
+                    self.com_rand_params[i, 0]
+                    * (
+                        self.cfg["env"]["random_params"]["com"]["range_high"]
+                        - self.cfg["env"]["random_params"]["com"]["range_low"]
+                    )
+                    + self.cfg["env"]["random_params"]["com"]["range_low"],
+                    self.com_rand_params[i, 1]
+                    * (
+                        self.cfg["env"]["random_params"]["com"]["range_high"]
+                        - self.cfg["env"]["random_params"]["com"]["range_low"]
+                    )
+                    + self.cfg["env"]["random_params"]["com"]["range_low"],
+                    self.com_rand_params[i, 2]
+                    * (
+                        self.cfg["env"]["random_params"]["com"]["range_high"]
+                        - self.cfg["env"]["random_params"]["com"]["range_low"]
+                    )
+                    + self.cfg["env"]["random_params"]["com"]["range_low"],
+                )
+
+                self.gym.set_actor_rigid_body_properties(
+                    env_ptr, a1_handle, rigid_props, recomputeInertia=True
+                )
+
+                self.gym.set_actor_dof_properties(env_ptr, a1_handle, dof_props)
+
             self.gym.enable_actor_dof_force_sensors(env_ptr, a1_handle)
             self.envs.append(env_ptr)
             self.a1_handles.append(a1_handle)
@@ -651,6 +853,25 @@ class Go1Dribbler(VecTask):
                 color_goal = gymapi.Vec3(c[0], c[1], c[2])
 
             if self.add_real_ball:
+                if self.do_rand:
+                    ball_rigid_shape_props[0].restitution = (
+                        self.cfg["env"]["random_params"]["ball_restitution"][
+                            "range_low"
+                        ]
+                        + (
+                            self.cfg["env"]["random_params"]["ball_restitution"][
+                                "range_high"
+                            ]
+                            - self.cfg["env"]["random_params"]["ball_restitution"][
+                                "range_low"
+                            ]
+                        )
+                        * self.ball_restitution_rand_params[i].item()
+                    )
+                    self.gym.set_asset_rigid_shape_properties(
+                        asset_ball, ball_rigid_shape_props
+                    )
+
                 ball_handle = self.gym.create_actor(
                     env_ptr,
                     asset_ball,
@@ -661,22 +882,22 @@ class Go1Dribbler(VecTask):
                     1,
                 )
 
-                this_ball_props = self.gym.get_actor_rigid_shape_properties(
-                    env_ptr, ball_handle
-                )
-                this_ball_props[0].rolling_friction = 0.1
-                this_ball_props[0].restitution = 0.9
-                self.gym.set_actor_rigid_shape_properties(
-                    env_ptr, ball_handle, this_ball_props
-                )
+                if self.do_rand:
+                    this_ball_phy_props = self.gym.get_actor_rigid_body_properties(
+                        env_ptr, ball_handle
+                    )
+                    this_ball_phy_props[0].mass = (
+                        self.cfg["env"]["random_params"]["ball_mass"]["range_low"]
+                        + (
+                            self.cfg["env"]["random_params"]["ball_mass"]["range_high"]
+                            - self.cfg["env"]["random_params"]["ball_mass"]["range_low"]
+                        )
+                        * self.ball_mass_rand_params[i].item()
+                    )
 
-                this_ball_phy_props = self.gym.get_actor_rigid_body_properties(
-                    env_ptr, ball_handle
-                )
-                this_ball_phy_props[0].mass = self.ball_mass
-                self.gym.set_actor_rigid_body_properties(
-                    env_ptr, ball_handle, this_ball_phy_props
-                )
+                    self.gym.set_actor_rigid_body_properties(
+                        env_ptr, ball_handle, this_ball_phy_props
+                    )
 
                 self.gym.set_rigid_body_color(
                     env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color
@@ -723,6 +944,18 @@ class Go1Dribbler(VecTask):
             self.envs[0], self.ball_handles[0], "ball"
         )
 
+    def sample_rand_params(self):
+        self.payload_rand_params = torch.rand((self.num_envs, 1), device=self.device)
+        self.com_rand_params = torch.rand((self.num_envs, 3), device=self.device)
+        self.friction_rand_params = torch.rand((self.num_envs, 4), device=self.device)
+        self.restitution_rand_params = torch.rand(
+            (self.num_envs, 4), device=self.device
+        )
+        self.ball_mass_rand_params = torch.rand((self.num_envs), device=self.device)
+        self.ball_restitution_rand_params = torch.rand(
+            (self.num_envs), device=self.device
+        )
+
     def add_cam(self, env_ptr, a1_handle):
         camera_properties = gymapi.CameraProperties()
         camera_properties.horizontal_fov = self.cam_range
@@ -754,6 +987,37 @@ class Go1Dribbler(VecTask):
         # wrap camera tensor in a pytorch tensor
         torch_cam_tensor = gymtorch.wrap_tensor(cam_tensor)
         self.camera_tensor_list.append(torch_cam_tensor)
+
+    def wandb_addtional_log(self):
+        if self.step_counter % self.wandb_log_period == 0:
+            if wandb.run is not None:
+                plt.ylabel(
+                    "x-command in [{},{}]".format(
+                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][0],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_x"][1],
+                    )
+                )
+                plt.xlabel(
+                    "y-command in [{},{}]".format(
+                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][0],
+                        self.cfg["env"]["randomCommandVelocityRanges"]["linear_y"][1],
+                    )
+                )
+                wandb.log(
+                    {
+                        "curriculum": plt.imshow(
+                            self.curriculum.weights_shaped.cpu(),
+                            cmap="gray",
+                            vmin=0.0,
+                            vmax=1.0,
+                        ).get_figure()
+                    }
+                )
+                total_grid_num = self.curriculum.weights_shaped.numel()
+                total_grid_weight = torch.sum(self.curriculum.weights_shaped).item()
+                wandb.log(
+                    {"curriculum complete rate": total_grid_weight / total_grid_num}
+                )
 
     def pre_physics_step(self, actions):
         self.last_last_targets = self.last_targets.clone()
@@ -869,10 +1133,15 @@ class Go1Dribbler(VecTask):
         # the reset is from the previous step
         # because we need the observation of 0 step, if compute_reset -> reset, we will lose the observation of 0 step
 
-        goal_env_ids = self.target_reset_buf.nonzero(as_tuple=False).squeeze(-1)
-        # print(goal_env_ids)
-        if len(goal_env_ids) > 0:
-            self.reset_only_target(goal_env_ids)
+        if self.rand_push:
+            push_ids = (
+                (self.progress_buf % self.rand_push_length == 0)
+                .nonzero(as_tuple=False)
+                .flatten()
+            )
+
+            if len(push_ids) > 0:
+                self._push_robots(push_ids)
 
         self.is_first_buf[:] = False
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(
@@ -894,12 +1163,37 @@ class Go1Dribbler(VecTask):
         # print("wall distance: ", torch.abs(self.ball_pos[:, 0] - self.wall_init_pos[0]))
         # print("rebound times: ", self.rebound_times)
 
-        self.compute_observations()
-        self.compute_reset()
+        resample_ids = (
+            (self.progress_buf % self.curri_resample_length == 0)
+            .nonzero(as_tuple=False)
+            .flatten()
+        )
+
         self.compute_reward(self.actions)
+
+        if len(resample_ids) > 0:
+            self.resample_commands(resample_ids)
+
+        self.compute_observations()
+
+        if wandb.run is not None and self.wandb_extra_log:
+            self.wandb_addtional_log()
+
+        self.compute_reset()
 
         if self.pixel_obs or self.have_cam_window:
             self.compute_pixels()
+
+        if self.do_rand and self.step_counter % self.random_frec == 0:
+            self.randomize_dof_props()
+
+        if self.drag_ball:
+            if self.step_counter % self.drag_ball_rand_length == 0:
+                print("=== randomize ball drag")
+                self._randomize_ball_drag()
+            self._apply_drag_force()
+
+        self.step_counter += 1
 
     def compute_pixels(self):
         self.frame_count += 1
@@ -1007,6 +1301,11 @@ class Go1Dribbler(VecTask):
         self.base_quat = self.root_states[::2, 3:7]
         self.base_pos = self.root_states[::2, 0:3]
         self.ball_pos = self.root_states[1::2, 0:3]
+
+        self.robot_ball_dis = torch.norm(
+            self.ball_pos - self.base_pos, dim=1, keepdim=False
+        )
+
         self.ball_lin_vel_xy_world = self.root_states[1::2, 7:9]
 
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
@@ -1073,6 +1372,9 @@ class Go1Dribbler(VecTask):
             torch.norm(self.contact_forces[:, self.knee_indices, :], dim=2) > 1.0, dim=1
         )
 
+        # too far away
+        reset = reset | (self.robot_ball_dis > self.robot_ball_max)
+
         # reset = reset | self.ball_in_goal_now
         time_out = self.progress_buf >= self.max_episode_length - 1
         reset = reset | time_out
@@ -1116,7 +1418,8 @@ class Go1Dribbler(VecTask):
             self.base_quat, self.root_states[1::2, 7:10]
         )
 
-        pw_ball = root_states[1::2, 0:3]
+        pw_ball = root_states[1::2, 0:3] - root_states[0::2, 0:3]
+        vw_ball = root_states[1::2, 7:10]
 
         cat_list = []
         # check dict have key
@@ -1152,7 +1455,9 @@ class Go1Dribbler(VecTask):
         obs = torch.cat(cat_list, dim=-1)
 
         self.obs_buf[:] = obs
-
+        # print("obs_buf:", obs[:, -2:])
+        # print("ball_vel", self.object_lin_vel[:, :2])
+        # print("body yaw", obs[:, -6])
         if self.obs_history:
             self.history_buffer[:] = torch.cat(
                 (self.history_buffer[:, self.num_obs :], obs), dim=1
@@ -1179,6 +1484,7 @@ class Go1Dribbler(VecTask):
 
             if not self.cfg["env"]["empty_privilege"]:
                 self.privilige_buffer[:] = torch.cat(priv_list, dim=-1)
+                # print("privilege buffer:", self.privilige_buffer)
 
     def _prepare_reward_function(self):
         """Prepares a list of reward functions, which will be called to compute the total reward.
@@ -1306,6 +1612,29 @@ class Go1Dribbler(VecTask):
 
         # copy initial robot and ball states
         self.root_states[env_ids * 2] = self.initial_root_states[env_ids * 2].clone()
+
+        # orientation randomization
+        random_yaw_angle = (
+            2
+            * (
+                torch.rand(
+                    len(env_ids),
+                    3,
+                    dtype=torch.float,
+                    device=self.device,
+                    requires_grad=False,
+                )
+                - 0.5
+            )
+            * torch.tensor([0, 0, 3.14], device=self.device)
+        )
+        self.root_states[env_ids * 2, 3:7] = quat_from_euler_xyz(
+            random_yaw_angle[:, 0], random_yaw_angle[:, 1], random_yaw_angle[:, 2]
+        )
+        self.root_states[env_ids * 2, 7:13] = torch_rand_float(
+            -0.5, 0.5, (len(env_ids), 6), device=self.device
+        )
+
         self.root_states[env_ids * 2 + 1] = self.initial_root_states[
             env_ids * 2 + 1
         ].clone()
@@ -1352,12 +1681,18 @@ class Go1Dribbler(VecTask):
         for i in range(len(self.lag_buffer)):
             self.lag_buffer[i][env_ids, :] = 0
 
-        self.commands_x[env_ids] = torch_rand_float(
-            -1, 1, (len(env_ids), 1), device=self.device
-        ).squeeze()
-        self.commands_y[env_ids] = torch_rand_float(
-            -1, 1, (len(env_ids), 1), device=self.device
-        ).squeeze()
+        # self.commands_x[env_ids] = torch_rand_float(
+        #     self.command_x_range[0],
+        #     self.command_x_range[1],
+        #     (len(env_ids), 1),
+        #     device=self.device,
+        # ).squeeze()
+        # self.commands_y[env_ids] = torch_rand_float(
+        #     self.command_y_range[0],
+        #     self.command_y_range[1],
+        #     (len(env_ids), 1),
+        #     device=self.device,
+        # ).squeeze()
 
     def deferred_set_actor_root_state_tensor_indexed(
         self, obj_indices: List[torch.Tensor]
@@ -1380,6 +1715,49 @@ class Go1Dribbler(VecTask):
         )
 
         self.actor_indices_for_reset = []
+
+    def resample_commands(self, env_ids):
+        old_bins = self.env_command_bins[env_ids]
+        # print("old_bins_is",old_bins)
+
+        task_rewards, success_thresholds = [], []
+        for key in [
+            "dribbling_ball_vel",
+            "tracking_contacts_shaped_force",
+            "tracking_contacts_shaped_vel",
+        ]:
+            if key in self.command_sums.keys():
+                task_rewards.append(
+                    self.command_sums[key][env_ids] / self.curri_resample_length
+                )  # because scale have additional dt
+                success_thresholds.append(
+                    self.curriculum_thresholds[key] * self.reward_scales[key]
+                )
+                # print("========================")
+
+                # print("max command sums = ",key,torch.max(self.command_sums[key][env_ids]).item() / self.curri_resample_length)
+                # print("command standard = ",key,self.curriculum_thresholds[key]* self.reward_scales[key])
+                # print("resample length", self.curri_resample_length)
+                # print("scales",key,self.reward_scales[key])
+
+        self.curriculum.update(
+            old_bins,
+            task_rewards,
+            success_thresholds,
+            local_range=self.curri_local_range,
+        )
+
+        new_commands, new_bin_inds = self.curriculum.sample(batch_size=len(env_ids))
+        self.env_command_bins[env_ids] = new_bin_inds
+        self.commands[env_ids] = new_commands[:, :].to(self.device)
+
+        # setting the smaller commands to zero
+        self.commands[env_ids, :2] *= (
+            torch.norm(self.commands[env_ids, :2], dim=1) > 0.2
+        ).unsqueeze(1)
+
+        for key in self.command_sums.keys():
+            self.command_sums[key][env_ids] = 0.0
 
     def _step_contact_targets(self):
         self.gait_indices = torch.remainder(
@@ -1462,3 +1840,75 @@ class Go1Dribbler(VecTask):
         self.desired_contact_states[:, 1] = smoothing_multiplier_FR
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
+
+    def _randomize_ball_drag(self):
+        self.ball_drags[:, :] = torch_rand_float(
+            self.cfg["env"]["random_params"]["ball_drag"]["range_low"],
+            self.cfg["env"]["random_params"]["ball_drag"]["range_high"],
+            (self.num_envs, 1),
+            device=self.device,
+        )
+
+    def _apply_drag_force(self):
+        self.force_tensor[:, self.num_bodies, :2] = (
+            -1.0  # -self.ball_drags
+            * torch.square(self.ball_lin_vel_xy_world[:, :2])
+            * torch.sign(self.ball_lin_vel_xy_world[:, :2])
+        )
+        self.gym.apply_rigid_body_force_tensors(
+            self.sim,
+            gymtorch.unwrap_tensor(self.force_tensor),
+            None,
+            gymapi.ENV_SPACE,
+        )
+
+    def _push_robots(self, env_ids):
+        """Random pushes the robots. Emulates an impulse by setting a randomized base velocity."""
+        # print("pushing robots", env_ids)
+
+        self.root_states[env_ids * 2, 7:9] += torch_rand_float(
+            -self.max_push_vel, self.max_push_vel, (len(env_ids), 2), device=self.device
+        )  # lin vel x/y
+        # print("root states", self.root_states[:, 7:9])
+        self.deferred_set_actor_root_state_tensor_indexed(env_ids * 2)
+        # # for debug
+        # self.root_states[env_ids * 2 + 1, 7] = 0.0
+        # self.root_states[env_ids * 2 + 1, 8] = 1.0
+        # self.deferred_set_actor_root_state_tensor_indexed(env_ids * 2 + 1)
+
+    def randomize_dof_props(self):
+        print("=== randomize properties of the environment")
+        self.dof_stiff_rand_params = torch.rand(
+            (self.num_envs, self.num_dof), device=self.device
+        )
+        self.dof_damping_rand_params = torch.rand(
+            (self.num_envs, self.num_dof), device=self.device
+        )
+        self.dof_calib_rand_params = torch.rand(
+            (self.num_envs, self.num_dof), device=self.device
+        )
+
+        for i in range(self.num_envs):
+            actor_handle = self.a1_handles[i]
+            env_handle = self.envs[i]
+            # DOF
+            dof_props = self.gym.get_actor_dof_properties(env_handle, actor_handle)
+            # print("==== dof_props:", dof_props)
+            for s in range(self.num_dof):
+                dof_props["stiffness"][s] = (
+                    self.cfg["env"]["random_params"]["stiffness"]["range_low"]
+                    + (
+                        self.cfg["env"]["random_params"]["stiffness"]["range_high"]
+                        - self.cfg["env"]["random_params"]["stiffness"]["range_low"]
+                    )
+                    * self.dof_stiff_rand_params[i, s].item()
+                )
+                dof_props["damping"][s] = (
+                    self.cfg["env"]["random_params"]["damping"]["range_low"]
+                    + (
+                        self.cfg["env"]["random_params"]["damping"]["range_high"]
+                        - self.cfg["env"]["random_params"]["damping"]["range_low"]
+                    )
+                    * self.dof_damping_rand_params[i, s].item()
+                )
+            self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)

@@ -3,75 +3,12 @@
 BlueRov video capture class
 """
 
-import atexit
 import cv2
 import gi
 import numpy as np
-import threading
-import sys
-import signal
-
-from isaacgymenvs.go1_deploy.utils.fisheye import Converter
-from ultralytics import YOLO
 
 gi.require_version("Gst", "1.0")
-from gi.repository import Gst
-
-
-class ObjectDetector:
-    def __init__(self, detection_model, converter):
-        self.detection_model = detection_model
-        self.converter = converter
-        self.frame = None
-        self.detection_result = None
-        self.lock = threading.Lock()
-        self.stop_thread = False
-
-        # Start a separate thread for detection
-        self.thread = threading.Thread(target=self._detect_thread)
-        self.thread.daemon = (
-            True  # Allow the program to exit even if this thread is running
-        )
-
-        atexit.register(self.stop)
-        self.thread.start()
-
-    def detect(self, frame):
-        # Set the current frame for detection
-        with self.lock:
-            self.frame = frame.copy()
-
-    def get_detection_result(self):
-        # Get the latest detection result
-        with self.lock:
-            return self.detection_result
-
-    def _detect_thread(self):
-        while not self.stop_thread:
-            if self.frame is not None:
-                # Perform object detection on the current frame
-                pinhole_frame = self.converter.fish_to_pinhole(self.frame)
-                # cv2.imshow("origin-backend", self.frame)
-                # cv2.imshow("pinhole-backend", pinhole_frame)
-                print("loop running ... ")
-                cv2.waitKey(10)
-                results = self.detection_model.predict(
-                    pinhole_frame, show=True, stream=False, device="cuda:1"
-                )
-
-                # for r in results:
-                #     im_array = r.plot()  # plot a BGR numpy array of predictions
-                #     cv2.imshow("result", im_array)
-                # cv2.waitKey(1)
-
-                # Store the detection result
-                # with self.lock:
-                #     self.detection_result = results
-                # print(results.)
-
-    def stop(self):
-        self.stop_thread = True
-        self.thread.join()
+from gi.repository import Gst, GObject
 
 
 class Video:
@@ -88,16 +25,15 @@ class Video:
         latest_frame (np.ndarray): Latest retrieved video frame
     """
 
-    def __init__(self, port=9200):
+    def __init__(self, port=9200, sink_index=0):
         """Summary
 
         Args:
             port (int, optional): UDP port
         """
 
-        Gst.init(None)
-
         self.port = port
+        self.app_index = sink_index
         self.latest_frame = self._new_frame = None
 
         # [Software component diagram](https://www.ardusub.com/software/components.html)
@@ -113,20 +49,14 @@ class Video:
             "! decodebin ! videoconvert ! video/x-raw,format=(string)BGR ! videoconvert"
         )
         # Create a sink to get data
-        self.video_sink_conf = (
-            "! appsink emit-signals=true sync=false max-buffers=2 drop=true"
+        self.video_sink_conf = "! appsink emit-signals=true sync=false max-buffers=2 drop=true name=appsink{}".format(
+            self.app_index
         )
 
         self.video_pipe = None
         self.video_sink = None
 
         self.run()
-
-        self.model = YOLO(
-            "/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/dataset/best_93.pt"
-        )
-        self.converter = Converter()
-        # self.detector = ObjectDetector(self.model, self.converter)
 
     def start_gst(self, config=None):
         """ Start gstreamer pipeline and sink
@@ -148,11 +78,12 @@ class Video:
                 "! appsink drop=1",
             ]
 
-        print("Gstreamer pipeline: {}".format(" ".join(config)))
         command = " ".join(config)
         self.video_pipe = Gst.parse_launch(command)
         self.video_pipe.set_state(Gst.State.PLAYING)
-        self.video_sink = self.video_pipe.get_by_name("appsink0")
+        self.video_sink = self.video_pipe.get_by_name(
+            "appsink{}".format(self.app_index)
+        )
 
     @staticmethod
     def gst_to_opencv(sample):
@@ -179,21 +110,11 @@ class Video:
         Returns:
             np.ndarray: latest retrieved image frame
         """
-        if self.frame_available():
+        if self.frame_available:
             self.latest_frame = self._new_frame
             # reset to indicate latest frame has been 'consumed'
             self._new_frame = None
         return self.latest_frame
-
-    def dectection_result(self, pinehole=True):
-        if pinehole:
-            _frame = self.converter.fish_to_pinhole(self.frame())
-        else:
-            _frame = self.frame()
-        result = self.model.predict(
-            _frame, show=False, stream=True, device="cuda:0", verbose=False
-        )
-        return result
 
     def frame_available(self):
         """Check if a new frame is available
@@ -225,38 +146,41 @@ class Video:
 
 
 if __name__ == "__main__":
-    import isaacgymenvs.go1_deploy.utils.fisheye_estimator as fe
-
     # Create the video object
     # Add port= if is necessary to use a different one
-    video = Video()
-    # model = YOLO("./dataset/best_93.pt")
+
+    Gst.init(None)
+    # GObject.threads_init()
+
+    video1 = Video(9200, 3)
+    video2 = Video(9209, 1)
 
     print("Initialising stream...")
     waited = 0
-    while not video.frame_available():
+    while not video1.frame_available():
         waited += 1
-        print("\r  Frame not available (x{})".format(waited), end="")
-        cv2.waitKey(1000)
+        print("\r video1 Frame not available (x{})".format(waited), end="")
+        cv2.waitKey(100)
+    while not video2.frame_available():
+        waited += 1
+        print("\r video2 Frame not available (x{})".format(waited), end="")
+        cv2.waitKey(100)
     print('\nSuccess!\nStarting streaming - press "q" to quit.')
 
-    convert = Converter()
     while True:
         # Wait for the next frame to become available
-        if video.frame_available():
+        if video1.frame_available():
             # Only retrieve and display a frame if it's new
-            frame = video.frame()
-            # cv2.imshow("origin", frame)
-            # print(frame.shape)
-            # cv2.waitKey(0)
-            # Convert fisheye to equirectangular
-            pinhole_frame = convert.fish_to_pinhole(frame)
+            frame1 = video1.frame()
+            cv2.imshow("origin-0", frame1)
+            frame2 = video2.frame()
+            cv2.imshow("origin-9", frame2)
 
             import os
 
             # Create a directory to save the frames
-            if not os.path.exists("saved_frames"):
-                os.makedirs("saved_frames")
+            if not os.path.exists("./saved_frames"):
+                os.makedirs("./saved_frames")
 
             # Initialize a counter to keep track of the frame number
             frame_num = 0
@@ -264,55 +188,51 @@ if __name__ == "__main__":
 
             while True:
                 # Wait for the next frame to become available
-                if video.frame_available():
+                if video1.frame_available():
                     # Only retrieve and display a frame if it's new
-                    frame = video.frame()
+                    frame1 = video1.frame()
                     # Convert fisheye to equirectangular
-
-                    cv2.imshow("origin", frame)
+                    cv2.imshow("origin-0", frame1)
 
                     # Display the frame
-                    # pinhole_frame = convert.fish_to_pinhole(frame)
-                    # cv2.imshow("frame", pinhole_frame)
-
-                    results = video.dectection_result(pinehole=False)
-
-                    for r in results:
-                        print(r.boxes)
-                        e_x, e_y, e_z = fe.estimate_3D_point(
-                            r.boxes.xyxy[0, 0],
-                            r.boxes.xyxy[0, 1],
-                            r.boxes.xyxy[0, 2],
-                            r.boxes.xyxy[0, 3],
-                        )
-                        print("==========================")
-                        print("x: ", e_x)
-                        print("y: ", e_y)
-                        print("z: ", e_z)
-                        im_array = r.plot()  # plot a BGR numpy array of predictions
-                        cv2.imshow("result", im_array)
 
                     # Save the frame as a picture if save_frames is True
                     if save_frames:
                         print("saving...", frame_num)
                         cv2.imwrite(
                             "./saved_frames/frame{}.jpg".format(frame_num),
-                            pinhole_frame,
+                            frame1,
                         )
                         frame_num += 1
 
-                    # Wait for a key press and check if the user wants to quit or save frames
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord("q"):
-                        break
-                    elif key == ord("s"):
-                        # Start saving frames after a key press
-                        save_frames = True
-                        print("press saving")
-                    elif key == ord("x"):
-                        # Stop saving frames after a second key press
-                        save_frames = False
-                        print("press stop")
+                if video2.frame_available():
+                    # Only retrieve and display a frame if it's new
+                    frame2 = video2.frame()
+                    cv2.imshow("origin-9", frame2)
+
+                    # Display the frame
+
+                    # Save the frame as a picture if save_frames is True
+                    if save_frames:
+                        print("saving...", frame_num)
+                        cv2.imwrite(
+                            "./saved_frames/frame{}.jpg".format(frame_num),
+                            frame2,
+                        )
+                        frame_num += 1
+
+                # Wait for a key press and check if the user wants to quit or save frames
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
+                elif key == ord("s"):
+                    # Start saving frames after a key press
+                    save_frames = True
+                    print("press saving")
+                elif key == ord("x"):
+                    # Stop saving frames after a second key press
+                    save_frames = False
+                    print("press stop")
 
             # Clean up
             cv2.destroyAllWindows()
