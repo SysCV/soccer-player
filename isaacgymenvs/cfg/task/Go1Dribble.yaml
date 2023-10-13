@@ -26,6 +26,8 @@ env:
     frequency: 3.0
     duration: 0.5
 
+  vision_receive_prob: 0.7
+
   state_observations:
 
     projected_gravity: 3
@@ -38,6 +40,17 @@ env:
 
     ball_states_p: 3
     command: 2
+
+  add_noise: true
+  obs_noise:
+    projected_gravity: 0.05
+    dof_pos: 0.01
+    dof_vel: 0.1
+    last_actions: 0
+    gait_sin_indict: 0
+    body_yaw: 0.03
+    ball_states_p: 0.05
+    command: 0
 
   pixel_observations:
     enable: false
@@ -100,6 +113,7 @@ env:
       enable: true
       range_low: -0.15
       range_high: 0.15
+      x_offset: 0.05
     payload:
       enable: true
       range_low: -1.0
@@ -118,16 +132,23 @@ env:
       range_high: 1.0
     ball_drag:
       enable: true
-      range_low: -0.0
-      range_high: 0.8
+      range_low:  -0.1
+      range_high: 1.5
       interval_s: 9
+    ball_reset:
+      enable: true
+      vel: 0.3
+      prob_vel: 8e-4
+      pos: 1.0
+      prob_pos: 2e-4
 
   randomization: true
   randomization_freq: 10000 # 1s = 50 steps
     
 
   terminateCondition:
-    robot_ball_max: 100.0
+    robot_ball_max: 3.0
+    ball_speed_max: 3.0
 
   plane:
     staticFriction: 0.0 # [-]
@@ -224,10 +245,10 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 20
+    episodeLength_s: 40
 
     curriculum:
-      resample_s: 5
+      resample_s: 10
       success_threshold:
         dribbling_ball_vel: 0.8
         tracking_contacts_shaped_force: 0.9

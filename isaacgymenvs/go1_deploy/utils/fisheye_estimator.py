@@ -2,7 +2,7 @@ import torch
 import math
 
 
-class StateEstimator:
+class BallEstimator:
     def __init__(self, T1, T2, last_state=torch.tensor([0.0, 0.0, 0.0])):
         self.T1 = torch.tensor(T1)  # Transformation matrix for camera 1 (4x4)
         self.T2 = torch.tensor(T2)  # Transformation matrix for camera 2 (4x4)
@@ -18,8 +18,8 @@ class StateEstimator:
             and ymax is not None
         ):
             x, y, z = self.estimate_3D_point(xmin, ymin, xmax, ymax)
-            self.history_cam1 = torch.tensor(
-                [x, y, z]
+            self.history_cam1 = self.T1 @ torch.tensor(
+                [[x], [y], [z], [1]]
             )  # Overwrite the history with the new measurement
 
     def update_cam2(self, xmin=None, ymin=None, xmax=None, ymax=None):
@@ -30,8 +30,8 @@ class StateEstimator:
             and ymax is not None
         ):
             x, y, z = self.estimate_3D_point(xmin, ymin, xmax, ymax)
-            self.history_cam2 = torch.tensor(
-                [x, y, z]
+            self.history_cam2 = self.T2 @ torch.tensor(
+                [[x], [y], [z], [1]]
             )  # Overwrite the history with the new measurement
 
     def estimate_3D_point(self, xmin, ymin, xmax, ymax):
@@ -47,12 +47,12 @@ class StateEstimator:
         distance = (fx * phi_real_ball / x_range) / 2 + (
             fy * phi_real_ball / y_range
         ) / 2
-        r = torch.sin(theta) * distance
+        r = math.sin(theta) * distance
         x_pixel = px - cx
         y_pixel = py - cy
-        x = x_pixel / torch.sqrt(x_pixel * x_pixel + y_pixel * y_pixel) * r
-        y = y_pixel / torch.sqrt(x_pixel * x_pixel + y_pixel * y_pixel) * r
-        z = torch.cos(theta) * r
+        x = x_pixel / math.sqrt(x_pixel * x_pixel + y_pixel * y_pixel) * r
+        y = y_pixel / math.sqrt(x_pixel * x_pixel + y_pixel * y_pixel) * r
+        z = math.cos(theta) * r
 
         return x, y, z
 
@@ -63,10 +63,10 @@ class StateEstimator:
         return (xmin + xmax) / 2, (ymin + ymax) / 2
 
     def get_pixel_theta(self, fx, fy, cx, cy, px, py):
-        theta = torch.sqrt(((px - cx) / fx) ** 2 + ((py - cy) / fy) ** 2)
+        theta = math.sqrt(((px - cx) / fx) ** 2 + ((py - cy) / fy) ** 2)
         return theta
 
-    def get_estimation_result(self):
+    def get_estimation_result(self, sep_print=False):
         if self.history_cam1 is not None and self.history_cam2 is not None:
             result = (self.history_cam1 + self.history_cam2) / 2
             self.last_state = result
@@ -79,36 +79,13 @@ class StateEstimator:
         else:
             result = self.last_state
 
+        if sep_print:
+            if self.history_cam1 is not None:
+                print("history_cam1: ", self.history_cam1.squeeze())
+            if self.history_cam2 is not None:
+                print("history_cam2: ", self.history_cam2.squeeze())
+
         self.history_cam1 = None
         self.history_cam2 = None
 
-        return result
-
-
-# Example usage:
-T1 = [
-    [1.0, 0.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0, 0.0],
-    [0.0, 0.0, 0.0, 1.0],
-]
-
-T2 = [
-    [1.0, 0.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0, 0.0],
-    [0.0, 0.0, 0.0, 1.0],
-]
-
-estimator = StateEstimator(T1, T2)
-
-# Update with measurements from camera 1 (provide xmin, ymin, xmax, ymax)
-estimator.update_cam1(xmin=100, ymin=150, xmax=200, ymax=250)
-
-# Update with measurements from camera 2 (provide xmin, ymin, xmax, ymax)
-estimator.update_cam2(xmin=120, ymin=160, xmax=220, ymax=260)
-
-# Estimate the position in 3D space
-estimated_position = estimator.get_estimation_result()
-
-print("Estimated Position:", estimated_position)
+        return result.squeeze()

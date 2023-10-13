@@ -5,6 +5,10 @@ import time
 import queue
 
 import numpy as np
+from ultralytics import YOLO
+import torch
+from gi.repository import Gst
+import cv2
 
 from isaacgymenvs.go1_deploy.lcm_types.leg_control_data_lcmt import (
     leg_control_data_lcmt,
@@ -17,6 +21,7 @@ from isaacgymenvs.go1_deploy.lcm_types.camera_message_rect_wide import (
     camera_message_rect_wide,
 )
 from isaacgymenvs.go1_deploy.utils.gst_receiver import Video
+from isaacgymenvs.go1_deploy.utils.fisheye_estimator import BallEstimator
 
 
 def get_rpy_from_quaternion(q):
@@ -53,8 +58,9 @@ def get_rotation_matrix_from_rpy(rpy):
 
 
 class StateEstimator:
-    def __init__(self, lc, use_cameras=True, use_gst=False):
+    def __init__(self, lc, use_cameras=True, use_gst=False, double_cam=False):
         # reverse legs
+        self.double_cam = double_cam
         self.joint_idxs = [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]
         self.contact_idxs = [1, 0, 3, 2]
         # self.joint_idxs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
@@ -133,7 +139,12 @@ class StateEstimator:
                 )
 
         if use_gst:
-            self.gst_video = Video()
+            Gst.init(None)
+            self.model = YOLO(
+                "/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/dataset/best_72.pt"
+            )
+
+            self.gst_video = Video(9200, 3)
             print("Initialising stream...")
             waited = 0
             while not self.gst_video.frame_available():
@@ -147,6 +158,38 @@ class StateEstimator:
                 time.sleep(1)
             print("\nSuccess!\nStarting streaming - ")
             self.gst_video.frame()
+
+        if double_cam:
+            # Example usage:
+            T1 = [
+                [0.0, 0.0, 1.0, 0.2911],
+                [-1.0, 0.0, 0.0, -0.0125],
+                [0.0, -1.0, 0.0, 0.01625],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+
+            T2 = [
+                [0.0, -1.0, 0.0, -0.0825],
+                [-1.0, 0.0, 0.0, -0.0125],
+                [0.0, 0.0, -1.0, -0.056],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+
+            self.estimator = BallEstimator(T1, T2)
+            self.gst_video2 = Video(9209, 1)
+            print("Initialising second stream...")
+            waited = 0
+            while not self.gst_video2.frame_available():
+                waited += 1
+                print(
+                    "\r  Frame not available, need to wait 10 second (x{})".format(
+                        waited
+                    ),
+                    end="",
+                )
+                time.sleep(1)
+            print("\nSuccess!\nStarting streaming - ")
+            self.gst_video2.frame()
 
         self.camera_image_left = None
         self.camera_image_right = None
@@ -342,11 +385,17 @@ class StateEstimator:
     def get_camera_gst(self):
         return self.gst_video.frame()
 
+    def get_camera_gst2(self):
+        assert self.double_cam, "Double camera not enabled"
+        return self.gst_video2.frame()
+
     def _legdata_cb(self, channel, data):
         # print("update legdata")
         if not self.received_first_legdata:
             self.received_first_legdata = True
+
             print(f"First legdata: {time.time() - self.init_time}")
+            print("=== First legdata received from LCM ===")
 
         msg = leg_control_data_lcmt.decode(data)
         # print(msg.q)
@@ -501,11 +550,68 @@ class StateEstimator:
         else:
             print("Image received from camera with unknown ID#!")
 
-    def get_gst_frame(self):
-        return self.gst_video.frame()
-
     def get_gst_frame_result(self):
-        return self.gst_video.dectection_result()
+        result = self.model(self.gst_video.frame())  # TODO: fix this
+        return result
+
+    def get_ball_estimation(self, plot=False, print_state=False):
+        assert self.double_cam, "Double camera not enabled"
+        # pic_list = [self.gst_video.frame(), self.gst_video2.frame()]
+        result = self.model([self.gst_video.frame(), self.gst_video2.frame()])
+
+        r1 = list(result)[0]
+        boxes1 = r1.boxes.xyxy
+        confidences1 = r1.boxes.conf
+        # pick the box with highest confidence higher than 0.5
+
+        valid_indices1 = (confidences1 > 0.5).nonzero()
+        if valid_indices1.size(0) > 0:
+            _, max_index1 = torch.max(confidences1[valid_indices1], dim=0)
+
+            # Get the corresponding box from the valid indices
+            xyxy1 = boxes1[valid_indices1[max_index1]].squeeze()
+            # print(xyxy1)
+            self.estimator.update_cam1(
+                xyxy1[0].item(),
+                xyxy1[1].item(),
+                xyxy1[2].item(),
+                xyxy1[3].item(),
+            )
+        else:
+            self.estimator.update_cam1()
+
+        r2 = list(result)[1]
+        boxes2 = r2.boxes.xyxy
+        confidences2 = r2.boxes.conf
+        # pick the box with highest confidence higher than 0.5
+
+        valid_indices2 = (confidences2 > 0.5).nonzero()
+        if valid_indices2.size(0) > 0:
+            _, max_index2 = torch.max(confidences2[valid_indices2], dim=0)
+
+            # Get the corresponding box from the valid indices
+            xyxy2 = boxes2[valid_indices2[max_index2]].squeeze()
+            self.estimator.update_cam2(
+                xyxy2[0].item(),
+                xyxy2[1].item(),
+                xyxy2[2].item(),
+                xyxy2[3].item(),
+            )
+
+        else:
+            self.estimator.update_cam2()
+
+        if plot:
+            im_array1 = r1.plot()  # plot a BGR numpy array of predictions
+            cv2.imshow("result1", im_array1)
+            im_array2 = r2.plot()  # plot a BGR numpy array of predictions
+            cv2.imshow("result2", im_array2)
+            cv2.waitKey(1)
+
+        estimated_position = self.estimator.get_estimation_result()
+        if print_state:
+            print(estimated_position)
+        return estimated_position
 
     def poll(self, cb=None):
         t = time.time()

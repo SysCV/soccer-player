@@ -12,66 +12,67 @@ import sys
 import signal
 
 from isaacgymenvs.go1_deploy.utils.fisheye import Converter
-from ultralytics import YOLO
+
+# from ultralytics import YOLO
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
 
-class ObjectDetector:
-    def __init__(self, detection_model, converter):
-        self.detection_model = detection_model
-        self.converter = converter
-        self.frame = None
-        self.detection_result = None
-        self.lock = threading.Lock()
-        self.stop_thread = False
+# class ObjectDetector:
+#     def __init__(self, detection_model, converter):
+#         self.detection_model = detection_model
+#         self.converter = converter
+#         self.frame = None
+#         self.detection_result = None
+#         self.lock = threading.Lock()
+#         self.stop_thread = False
 
-        # Start a separate thread for detection
-        self.thread = threading.Thread(target=self._detect_thread)
-        self.thread.daemon = (
-            True  # Allow the program to exit even if this thread is running
-        )
+#         # Start a separate thread for detection
+#         self.thread = threading.Thread(target=self._detect_thread)
+#         self.thread.daemon = (
+#             True  # Allow the program to exit even if this thread is running
+#         )
 
-        atexit.register(self.stop)
-        self.thread.start()
+#         atexit.register(self.stop)
+#         self.thread.start()
 
-    def detect(self, frame):
-        # Set the current frame for detection
-        with self.lock:
-            self.frame = frame.copy()
+#     def detect(self, frame):
+#         # Set the current frame for detection
+#         with self.lock:
+#             self.frame = frame.copy()
 
-    def get_detection_result(self):
-        # Get the latest detection result
-        with self.lock:
-            return self.detection_result
+#     def get_detection_result(self):
+#         # Get the latest detection result
+#         with self.lock:
+#             return self.detection_result
 
-    def _detect_thread(self):
-        while not self.stop_thread:
-            if self.frame is not None:
-                # Perform object detection on the current frame
-                pinhole_frame = self.converter.fish_to_pinhole(self.frame)
-                # cv2.imshow("origin-backend", self.frame)
-                # cv2.imshow("pinhole-backend", pinhole_frame)
-                print("loop running ... ")
-                cv2.waitKey(10)
-                results = self.detection_model.predict(
-                    pinhole_frame, show=True, stream=False, device="cuda:1"
-                )
+#     def _detect_thread(self):
+#         while not self.stop_thread:
+#             if self.frame is not None:
+#                 # Perform object detection on the current frame
+#                 pinhole_frame = self.converter.fish_to_pinhole(self.frame)
+#                 # cv2.imshow("origin-backend", self.frame)
+#                 # cv2.imshow("pinhole-backend", pinhole_frame)
+#                 print("loop running ... ")
+#                 cv2.waitKey(10)
+#                 results = self.detection_model.predict(
+#                     pinhole_frame, show=True, stream=False, device="cuda:1"
+#                 )
 
-                # for r in results:
-                #     im_array = r.plot()  # plot a BGR numpy array of predictions
-                #     cv2.imshow("result", im_array)
-                # cv2.waitKey(1)
+#                 # for r in results:
+#                 #     im_array = r.plot()  # plot a BGR numpy array of predictions
+#                 #     cv2.imshow("result", im_array)
+#                 # cv2.waitKey(1)
 
-                # Store the detection result
-                # with self.lock:
-                #     self.detection_result = results
-                # print(results.)
+#                 # Store the detection result
+#                 # with self.lock:
+#                 #     self.detection_result = results
+#                 # print(results.)
 
-    def stop(self):
-        self.stop_thread = True
-        self.thread.join()
+#     def stop(self):
+#         self.stop_thread = True
+#         self.thread.join()
 
 
 class Video:
@@ -88,16 +89,15 @@ class Video:
         latest_frame (np.ndarray): Latest retrieved video frame
     """
 
-    def __init__(self, port=9200):
+    def __init__(self, port=9200, sink_index=0):
         """Summary
 
         Args:
             port (int, optional): UDP port
         """
 
-        Gst.init(None)
-
         self.port = port
+        self.app_index = sink_index
         self.latest_frame = self._new_frame = None
 
         # [Software component diagram](https://www.ardusub.com/software/components.html)
@@ -113,20 +113,14 @@ class Video:
             "! decodebin ! videoconvert ! video/x-raw,format=(string)BGR ! videoconvert"
         )
         # Create a sink to get data
-        self.video_sink_conf = (
-            "! appsink emit-signals=true sync=false max-buffers=2 drop=true"
+        self.video_sink_conf = "! appsink emit-signals=true sync=false max-buffers=2 drop=true name=appsink{}".format(
+            self.app_index
         )
 
         self.video_pipe = None
         self.video_sink = None
 
         self.run()
-
-        self.model = YOLO(
-            "/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/dataset/best_93.pt"
-        )
-        self.converter = Converter()
-        # self.detector = ObjectDetector(self.model, self.converter)
 
     def start_gst(self, config=None):
         """ Start gstreamer pipeline and sink
@@ -148,11 +142,12 @@ class Video:
                 "! appsink drop=1",
             ]
 
-        print("Gstreamer pipeline: {}".format(" ".join(config)))
         command = " ".join(config)
         self.video_pipe = Gst.parse_launch(command)
         self.video_pipe.set_state(Gst.State.PLAYING)
-        self.video_sink = self.video_pipe.get_by_name("appsink0")
+        self.video_sink = self.video_pipe.get_by_name(
+            "appsink{}".format(self.app_index)
+        )
 
     @staticmethod
     def gst_to_opencv(sample):
@@ -184,16 +179,6 @@ class Video:
             # reset to indicate latest frame has been 'consumed'
             self._new_frame = None
         return self.latest_frame
-
-    def dectection_result(self, pinehole=True):
-        if pinehole:
-            _frame = self.converter.fish_to_pinhole(self.frame())
-        else:
-            _frame = self.frame()
-        result = self.model.predict(
-            _frame, show=False, stream=True, device="cuda:0", verbose=False
-        )
-        return result
 
     def frame_available(self):
         """Check if a new frame is available

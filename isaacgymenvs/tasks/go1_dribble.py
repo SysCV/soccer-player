@@ -164,6 +164,7 @@ class Go1Dribbler(VecTask):
 
         # termination conditions
         self.robot_ball_max = self.cfg["env"]["terminateCondition"]["robot_ball_max"]
+        self.ball_speed_max = self.cfg["env"]["terminateCondition"]["ball_speed_max"]
 
         # plane params
         self.plane_static_friction = self.cfg["env"]["plane"]["staticFriction"]
@@ -194,6 +195,49 @@ class Go1Dribbler(VecTask):
         for v in self.cfg["env"]["state_observations"].values():
             numObservations += v
         self.cfg["env"]["numObservations"] = numObservations
+
+        self.vision_receive_prob = self.cfg["env"]["vision_receive_prob"]
+
+        # noise
+        self.add_noise = self.cfg["env"]["add_noise"]
+        noise_list = [
+            torch.ones(
+                self.cfg["env"]["state_observations"]["projected_gravity"],
+                device=rl_device,
+            )
+            * self.cfg["env"]["obs_noise"]["projected_gravity"],
+            torch.ones(
+                self.cfg["env"]["state_observations"]["dof_pos"], device=rl_device
+            )
+            * self.cfg["env"]["obs_noise"]["dof_pos"],
+            torch.ones(
+                self.cfg["env"]["state_observations"]["dof_vel"], device=rl_device
+            )
+            * self.cfg["env"]["obs_noise"]["dof_vel"],
+            torch.ones(
+                self.cfg["env"]["state_observations"]["last_actions"], device=rl_device
+            )
+            * self.cfg["env"]["obs_noise"]["last_actions"],
+            torch.ones(
+                self.cfg["env"]["state_observations"]["gait_sin_indict"],
+                device=rl_device,
+            )
+            * self.cfg["env"]["obs_noise"]["gait_sin_indict"],
+            torch.ones(
+                self.cfg["env"]["state_observations"]["body_yaw"], device=rl_device
+            )
+            * self.cfg["env"]["obs_noise"]["body_yaw"],
+            torch.ones(
+                self.cfg["env"]["state_observations"]["ball_states_p"], device=rl_device
+            )
+            * self.cfg["env"]["obs_noise"]["ball_states_p"],
+            torch.ones(
+                self.cfg["env"]["state_observations"]["command"], device=rl_device
+            )
+            * self.cfg["env"]["obs_noise"]["command"],
+        ]
+
+        self.noise_vec = torch.cat(noise_list)
 
         # history
         self.obs_history = self.cfg["env"]["obs_history"]
@@ -303,6 +347,11 @@ class Go1Dribbler(VecTask):
         self.drag_ball_rand_length = int(
             self.cfg["env"]["random_params"]["ball_drag"]["interval_s"] / self.dt + 0.5
         )
+
+        self.ball_pos_prob = self.cfg["env"]["random_params"]["ball_reset"]["prob_pos"]
+        self.ball_pos_reset = self.cfg["env"]["random_params"]["ball_reset"]["pos"]
+        self.ball_vel_prob = self.cfg["env"]["random_params"]["ball_reset"]["prob_vel"]
+        self.ball_vel_reset = self.cfg["env"]["random_params"]["ball_reset"]["vel"]
 
         self._prepare_reward_function()
 
@@ -535,6 +584,14 @@ class Go1Dribbler(VecTask):
         self.commands_x = self.commands.view(self.num_envs, 2)[..., 0]
         self.commands_y = self.commands.view(self.num_envs, 2)[..., 1]
 
+        self.ball_lin_vel_xy_world = torch.zeros(
+            self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False
+        )
+
+        self.object_local_pos = torch.zeros(
+            self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False
+        )
+
         self.default_dof_pos = torch.zeros_like(
             self.dof_pos, dtype=torch.float, device=self.device, requires_grad=False
         )
@@ -556,9 +613,9 @@ class Go1Dribbler(VecTask):
         )
 
         self.initial_root_states = self.root_states.clone()
-        self.initial_root_states[:] = to_torch(
-            self.base_init_state, device=self.device, requires_grad=False
-        )
+        # self.initial_root_states[:] = to_torch(
+        #     self.base_init_state, device=self.device, requires_grad=False
+        # )
         self.gravity_vec = to_torch(
             get_axis_params(-1.0, self.up_axis_idx), device=self.device
         ).repeat((self.num_envs, 1))
@@ -733,7 +790,7 @@ class Go1Dribbler(VecTask):
 
         asset_options = gymapi.AssetOptions()
         asset_options.density = 0.1
-        asset_ball = self.gym.create_sphere(self.sim, 0.1, asset_options)
+        asset_ball = self.gym.create_sphere(self.sim, 0.11, asset_options)
 
         # randomization params, here because some param can only be applied
         # during set up
@@ -819,7 +876,8 @@ class Go1Dribbler(VecTask):
                         self.cfg["env"]["random_params"]["com"]["range_high"]
                         - self.cfg["env"]["random_params"]["com"]["range_low"]
                     )
-                    + self.cfg["env"]["random_params"]["com"]["range_low"],
+                    + self.cfg["env"]["random_params"]["com"]["range_low"]
+                    + self.cfg["env"]["random_params"]["com"]["x_offset"],
                     self.com_rand_params[i, 1]
                     * (
                         self.cfg["env"]["random_params"]["com"]["range_high"]
@@ -1032,7 +1090,16 @@ class Go1Dribbler(VecTask):
         actions_scaled[:, [0, 3, 6, 9]] *= self.hip_addtional_scale
 
         self.lag_buffer = self.lag_buffer[1:] + [actions_scaled.clone().to(self.device)]
-        self.targets = self.lag_buffer[0] + self.default_dof_pos
+        self.targets = (
+            self.lag_buffer[0]
+            + self.default_dof_pos
+            + self.cfg["env"]["random_params"]["dof_calib"]["range_low"]
+            + (
+                self.cfg["env"]["random_params"]["dof_calib"]["range_high"]
+                - self.cfg["env"]["random_params"]["dof_calib"]["range_low"]
+            )
+            * self.dof_calib_rand_params
+        )
 
         self.gym.set_dof_position_target_tensor(
             self.sim, gymtorch.unwrap_tensor(self.targets)
@@ -1151,10 +1218,16 @@ class Go1Dribbler(VecTask):
             self.reset_idx(env_ids)
             self.is_first_buf[env_ids] = True
 
+        self._randomize_ball_state()
+
         self.set_actor_root_state_tensor_indexed()
+
+        # print("root_states before:", self.root_states)
 
         self.refresh_self_buffers()
         self._step_contact_targets()
+
+        # print("root_states:", self.root_states)
 
         # print("=====================================================")
         # print("event: ", self.is_back)
@@ -1314,11 +1387,15 @@ class Go1Dribbler(VecTask):
             self.num_envs, -1
         ) * 1.0
         self.base_lin_vel = self.root_states[::2, 7:10]
-        self.object_local_pos = quat_rotate_inverse(
+        self.true_object_local_pos = quat_rotate_inverse(
             self.base_quat, self.root_states[1::2, 0:3] - self.root_states[0::2, 0:3]
         )
-        self.object_local_pos[:, 2] = 0.0 * torch.ones(
+        self.true_object_local_pos[:, 2] = 0.0 * torch.ones(
             self.num_envs, dtype=torch.float, device=self.device, requires_grad=False
+        )
+
+        self.object_local_pos = self.simulate_ball_pos_delay(
+            self.true_object_local_pos, self.object_local_pos
         )
         self.object_lin_vel = self.root_states[1::2, 7:10]
 
@@ -1375,6 +1452,10 @@ class Go1Dribbler(VecTask):
         # too far away
         reset = reset | (self.robot_ball_dis > self.robot_ball_max)
 
+        reset = reset | torch.any(
+            self.ball_lin_vel_xy_world > self.ball_speed_max, dim=1
+        )
+
         # reset = reset | self.ball_in_goal_now
         time_out = self.progress_buf >= self.max_episode_length - 1
         reset = reset | time_out
@@ -1385,6 +1466,13 @@ class Go1Dribbler(VecTask):
 
     def compute_observations(self):
         root_states = self.root_states[:, :]
+        # if self.step_counter < 50 * 10:
+        #     self.commands[:, 0] = 1.0
+        #     self.commands[:, 1] = 0.0
+        # else:
+        #     self.commands[:, 0] = -1.0
+        #     self.commands[:, 1] = 0.0
+        # print("commands:", self.commands)
         commands = self.commands
         dof_pos = self.dof_pos
         default_dof_pos = self.default_dof_pos
@@ -1454,7 +1542,11 @@ class Go1Dribbler(VecTask):
 
         obs = torch.cat(cat_list, dim=-1)
 
+        if self.add_noise:
+            obs += (2 * torch.rand_like(obs) - 1) * self.noise_vec
+
         self.obs_buf[:] = obs
+        # print("ball pos:", obs[:, -5:-2])
         # print("obs_buf:", obs[:, -2:])
         # print("ball_vel", self.object_lin_vel[:, :2])
         # print("body yaw", obs[:, -6])
@@ -1612,6 +1704,9 @@ class Go1Dribbler(VecTask):
 
         # copy initial robot and ball states
         self.root_states[env_ids * 2] = self.initial_root_states[env_ids * 2].clone()
+        self.root_states[env_ids * 2 + 1] = self.initial_root_states[
+            env_ids * 2 + 1
+        ].clone()
 
         # orientation randomization
         random_yaw_angle = (
@@ -1635,9 +1730,9 @@ class Go1Dribbler(VecTask):
             -0.5, 0.5, (len(env_ids), 6), device=self.device
         )
 
-        self.root_states[env_ids * 2 + 1] = self.initial_root_states[
-            env_ids * 2 + 1
-        ].clone()
+        self.root_states[env_ids * 2 + 1, 7:13] = torch_rand_float(
+            -0.5, 0.5, (len(env_ids), 6), device=self.device
+        )
 
         # jump by 2, because a1,ball,a1,ball
         self.root_states[env_ids * 2 + 1, 0] = (
@@ -1672,6 +1767,7 @@ class Go1Dribbler(VecTask):
         self.reset_buf[env_ids] = 1
         self.last_targets[env_ids] = 0.0
         self.last_last_targets[env_ids] = 0.0
+        self.object_local_pos[env_ids] = 0.0
 
         if self.obs_history:
             self.history_buffer[env_ids, :] = torch.tile(
@@ -1851,7 +1947,7 @@ class Go1Dribbler(VecTask):
 
     def _apply_drag_force(self):
         self.force_tensor[:, self.num_bodies, :2] = (
-            -1.0  # -self.ball_drags
+            -self.ball_drags
             * torch.square(self.ball_lin_vel_xy_world[:, :2])
             * torch.sign(self.ball_lin_vel_xy_world[:, :2])
         )
@@ -1861,6 +1957,62 @@ class Go1Dribbler(VecTask):
             None,
             gymapi.ENV_SPACE,
         )
+
+    def _randomize_ball_state(self):
+        reset_ball_pos_mark = np.random.choice(
+            [True, False],
+            self.num_envs,
+            p=[self.ball_pos_prob, 1 - self.ball_pos_prob],
+        )
+        reset_ball_pos_env_ids = torch.tensor(
+            np.array(np.nonzero(reset_ball_pos_mark)), device=self.device
+        ).flatten()  # reset_ball_pos_mark.nonzero(as_tuple=False).flatten()
+        ball_pos_env_ids = (
+            reset_ball_pos_env_ids.to(device=self.device) * 2 + 1
+        )  # ball index
+        # reset_ball_pos_env_ids_int32 = ball_pos_env_ids.to(dtype=torch.int32)
+        self.root_states[ball_pos_env_ids, 0:3] += (
+            2
+            * (
+                torch.rand(
+                    len(ball_pos_env_ids),
+                    3,
+                    dtype=torch.float,
+                    device=self.device,
+                    requires_grad=False,
+                )
+                - 0.5
+            )
+            * torch.tensor(self.ball_pos_reset, device=self.device, requires_grad=False)
+        )
+
+        reset_ball_vel_mark = np.random.choice(
+            [True, False],
+            self.num_envs,
+            p=[self.ball_vel_prob, 1 - self.ball_vel_prob],
+        )
+        reset_ball_vel_env_ids = torch.tensor(
+            np.array(np.nonzero(reset_ball_vel_mark)), device=self.device
+        ).flatten()
+        ball_vel_env_ids = reset_ball_vel_env_ids.to(device=self.device) * 2 + 1
+        self.root_states[ball_vel_env_ids, 7:10] = (
+            2
+            * (
+                torch.rand(
+                    len(ball_vel_env_ids),
+                    3,
+                    dtype=torch.float,
+                    device=self.device,
+                    requires_grad=False,
+                )
+                - 0.5
+            )
+            * torch.tensor(self.ball_pos_reset, device=self.device, requires_grad=False)
+        )
+
+        # reset_ball_vel_env_ids_int32 = ball_vel_env_ids.to(dtype=torch.int32)
+        self.deferred_set_actor_root_state_tensor_indexed(ball_pos_env_ids)
+        self.deferred_set_actor_root_state_tensor_indexed(ball_vel_env_ids)
 
     def _push_robots(self, env_ids):
         """Random pushes the robots. Emulates an impulse by setting a randomized base velocity."""
@@ -1875,6 +2027,19 @@ class Go1Dribbler(VecTask):
         # self.root_states[env_ids * 2 + 1, 7] = 0.0
         # self.root_states[env_ids * 2 + 1, 8] = 1.0
         # self.deferred_set_actor_root_state_tensor_indexed(env_ids * 2 + 1)
+
+    def simulate_ball_pos_delay(self, new_ball_pos, last_ball_pos):
+        receive_mark = np.random.choice(
+            [True, False],
+            self.num_envs,
+            p=[
+                self.vision_receive_prob,
+                1 - self.vision_receive_prob,
+            ],
+        )
+        last_ball_pos[receive_mark, :] = new_ball_pos[receive_mark, :]
+
+        return last_ball_pos
 
     def randomize_dof_props(self):
         print("=== randomize properties of the environment")

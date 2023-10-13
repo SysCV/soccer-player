@@ -144,7 +144,7 @@ class RewardTerms:
         )
 
         delta_dribbling_robot_ball_vel = 1.0
-        robot_ball_vec = self.env.object_local_pos[:, 0:2] - FR_HIP_positions[:, 0:2]
+        robot_ball_vec = self.env.true_object_local_pos[:, 0:2] - FR_HIP_positions[:, 0:2]
         d_robot_ball = robot_ball_vec / torch.norm(robot_ball_vec, dim=-1).unsqueeze(
             dim=-1
         )
@@ -184,7 +184,7 @@ class RewardTerms:
         rew_dribbling_robot_ball_pos = torch.exp(
             -delta_dribbling_robot_ball_pos
             * torch.pow(
-                torch.norm(self.env.object_local_pos - FR_HIP_positions, dim=-1), 2
+                torch.norm(self.env.true_object_local_pos - FR_HIP_positions, dim=-1), 2
             )
         )
         return rew_dribbling_robot_ball_pos

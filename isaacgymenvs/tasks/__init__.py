@@ -128,6 +128,7 @@ isaacgym_task_map = {
 try:
     from .go1_ball_real import BallReal
     from .go1real import Go1Real
+    from .go1_dribble_real import DribbleReal
 except:
     print("No real robot envs and packages installed")
 else:
@@ -135,5 +136,6 @@ else:
         {
             "Go1BallReal": BallReal,
             "Go1Real": Go1Real,
+            "Go1DribbleReal": DribbleReal,
         }
     )
