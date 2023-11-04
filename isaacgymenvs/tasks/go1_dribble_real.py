@@ -639,7 +639,7 @@ class DribbleReal(VecTask):
         commands_scaled = commands[:, :2] * lin_vel_scale
 
         ball_3d = self.agents["hardware_closed_loop"].se.get_ball_estimation(
-            False, False
+            plot_img=False, print_state=False
         )
         ball_3d[2] = 0.0
 
@@ -649,7 +649,7 @@ class DribbleReal(VecTask):
         # print("tensor dof_pos_scaled:", dof_pos_scaled)
         # print("tensor dof_vel_scaled:", dof_vel_scaled)
         # print("tensor commands_scaled:", commands_scaled)
-        print("tensor yaw_tensor:", yaw_tensor)
+        # print("tensor yaw_tensor:", yaw_tensor)
         # print("tensor ball_3d:", ball_3d)
         # print("tensor actions:", self.actions)
         # print("tensor clock_inputs:", self.clock_inputs)

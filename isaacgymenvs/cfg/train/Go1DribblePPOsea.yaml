@@ -35,7 +35,7 @@ params:
         name: None
 
     history:
-      units: [256, 128]
+      units: [512, 256]
       activation: elu
       d2rl: False
 
@@ -71,7 +71,7 @@ params:
     truncate_grads: True
     grad_norm: 1.
     horizon_length: 24
-    minibatch_size: 24000 # original paper 24 * 4000 / 4 = 24000
+    minibatch_size: 32000 # original paper 24 * 8000 / 6 = 32000
     # minibatch_size_per_env: 6
     mini_epochs: 5
     critic_coef: 2

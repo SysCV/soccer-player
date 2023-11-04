@@ -16,7 +16,6 @@ env:
   history_length: 15
 
   action_lag_step: 1
-  vision_lag_step: 15 # 300ms
 
   gait_condition:
     # trotting [0.5,0,0] pacing [0,0,0.5]
@@ -30,6 +29,7 @@ env:
   vision_receive_prob: 0.7
 
   state_observations:
+
     projected_gravity: 3
     dof_pos: 12
     dof_vel: 12
@@ -69,17 +69,8 @@ env:
     base_lin_vel: 3
     base_ang_vel: 3
 
-    ball_states_v_0: 3 
-    ball_states_p_0: 3
-
-    ball_states_v_4: 3 
-    ball_states_p_4: 3
-
-    ball_states_v_9: 3
-    ball_states_p_9: 3
-
-    ball_states_v_14: 3 
-    ball_states_p_14: 3
+    ball_states_v: 3 # can be in world frame, because have yaw
+    ball_states_p: 3
 
     dof_stiff: 12
     dof_damp: 12
@@ -154,7 +145,7 @@ env:
       range_high: 1.0
     ball_drag:
       enable: true
-      range_low: -0.1
+      range_low:  -0.1
       range_high: 0.5 # 1.5
       interval_s: 19
     ball_reset:
@@ -166,6 +157,7 @@ env:
 
   randomization: true
   randomization_freq: 10000 # 1s = 50 steps
+    
 
   terminateCondition:
     robot_ball_max: 3.0
@@ -238,7 +230,7 @@ env:
       # raibert_heuristic_self: -10.0
       raibert_heuristic_PID: -10.0
       # feet_clearance: -30.0
-      tracking_lin_vel_PID: 1.0 # make sure it is after raibert_heuristic_PID
+      # tracking_lin_vel_PID: 1.0 # make sure it is after raibert_heuristic_PID
 
       # dribbling ball
       dribbling_robot_ball_vel: 0.5
@@ -288,6 +280,7 @@ env:
         tracking_contacts_shaped_force: 0.9
         tracking_contacts_shaped_vel: 0.9
       local_range: [0.4, 0.4]
+
 
   # viewer cam:
   viewer:

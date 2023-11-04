@@ -126,6 +126,9 @@ class Go1WallKicker(VecTask):
             plt.axis("off")
         self.add_real_ball = self.cfg["task"]["target_ball"]
 
+        self.do_rand = self.cfg["env"]["randomization"]
+        self.random_frec = self.cfg["env"]["randomization_freq"]
+
         # normalization
         self.lin_vel_scale = self.cfg["env"]["learn"]["linearVelocityScale"]
         self.ang_vel_scale = self.cfg["env"]["learn"]["angularVelocityScale"]
@@ -148,7 +151,6 @@ class Go1WallKicker(VecTask):
         self.ball_y_range = self.cfg["env"]["terminateCondition"]["ball_y_range"]
 
         # randomization
-        self.randomization_params = self.cfg["task"]["randomization_params"]
         self.randomize = self.cfg["task"]["randomize"]
 
         # command ranges
@@ -193,6 +195,19 @@ class Go1WallKicker(VecTask):
         for v in self.cfg["env"]["state_observations"].values():
             numObservations += v
         self.cfg["env"]["numObservations"] = numObservations
+
+        self.add_noise = self.cfg["env"]["add_noise"]
+        noise_list = []
+        for k in self.cfg["env"]["obs_noise"].keys():
+            noise_list.append(
+                torch.ones(
+                    self.cfg["env"]["state_observations"][k],
+                    device=rl_device,
+                )
+                * self.cfg["env"]["obs_noise"][k]
+            )
+
+        self.noise_vec = torch.cat(noise_list)
 
         # history
         self.obs_history = self.cfg["env"]["obs_history"]
@@ -297,6 +312,12 @@ class Go1WallKicker(VecTask):
         self.max_stable_length_s = self.cfg["env"]["learn"]["maxStableLength_s"]
         self.max_stable_length = int(self.max_stable_length_s / self.dt + 0.5)
         self.max_onground_length = int(self.max_onground_length_s / self.dt + 0.5)
+
+        self.rand_push = self.cfg["env"]["random_params"]["push"]["enable"]
+        self.rand_push_length = int(
+            self.cfg["env"]["random_params"]["push"]["interval_s"] / self.dt + 0.5
+        )
+        self.max_push_vel = self.cfg["env"]["random_params"]["push"]["max_vel"]
 
         # image_num = self.cfg["env"]["pixel_observations"]["history"]
         # image_channels = 3
@@ -406,6 +427,8 @@ class Go1WallKicker(VecTask):
 
     def create_self_buffers(self):
         # initialize some data used later on
+
+        self.step_counter = 0
         # the differce with monitor is that these are not wrapped gym-state tensors
 
         # default gait
@@ -578,14 +601,57 @@ class Go1WallKicker(VecTask):
         # plane_params.rolling_friction = 0.6
         self.gym.add_ground(self.sim, plane_params)
 
+    def _prepare_rand_params(self):
+        self.dof_stiff_rand_params = torch.zeros(
+            self.num_envs, self.num_dof, device=self.device, dtype=torch.float
+        )
+        self.dof_calib_rand_params = torch.zeros(
+            self.num_envs, self.num_dof, device=self.device, dtype=torch.float
+        )
+        self.dof_damping_rand_params = torch.zeros(
+            self.num_envs, self.num_dof, device=self.device, dtype=torch.float
+        )
+        self.payload_rand_params = torch.zeros(
+            self.num_envs, 1, device=self.device, dtype=torch.float
+        )
+        self.friction_rand_params = torch.zeros(
+            self.num_envs, 4, device=self.device, dtype=torch.float
+        )
+        self.restitution_rand_params = torch.zeros(
+            self.num_envs, 4, device=self.device, dtype=torch.float
+        )
+        self.com_rand_params = torch.zeros(self.num_envs, 3, device=self.device)
+
+        self.ball_mass_rand_params = torch.zeros(
+            self.num_envs, 1, device=self.device, dtype=torch.float
+        )
+        self.ball_restitution_rand_params = torch.zeros(
+            self.num_envs, 1, device=self.device, dtype=torch.float
+        )
+        self.wall_restitution_rand_params = torch.zeros(
+            self.num_envs, 1, device=self.device, dtype=torch.float
+        )
+
+    def sample_rand_params(self):
+        self.payload_rand_params = torch.rand((self.num_envs, 1), device=self.device)
+        self.com_rand_params = torch.rand((self.num_envs, 3), device=self.device)
+        self.friction_rand_params = torch.rand((self.num_envs, 4), device=self.device)
+        self.restitution_rand_params = torch.rand(
+            (self.num_envs, 4), device=self.device
+        )
+        self.ball_mass_rand_params = torch.rand((self.num_envs, 1), device=self.device)
+        self.ball_restitution_rand_params = torch.rand(
+            (self.num_envs, 1), device=self.device
+        )
+        self.wall_restitution_rand_params = torch.rand(
+            (self.num_envs, 1), device=self.device
+        )
+
     def _create_envs(self, num_envs, spacing, num_per_row):
         asset_root = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "../../assets"
         )
         asset_file = "urdf/go1/urdf/go1.urdf"
-        # asset_path = os.path.join(asset_root, asset_file)
-        # asset_root = os.path.dirname(asset_path)
-        # asset_file = os.path.basename(asset_path)
 
         asset_options = gymapi.AssetOptions()
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
@@ -638,7 +704,7 @@ class Go1WallKicker(VecTask):
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
 
         asset_options = gymapi.AssetOptions()
-        asset_options.density = 0.1
+        asset_options.density = 1.0
         asset_ball = self.gym.create_sphere(self.sim, 0.1, asset_options)
 
         self.a1_handles = []
@@ -677,12 +743,104 @@ class Go1WallKicker(VecTask):
         goal_asset = asset_box  #  circle_asset
 
         silver_color = gymapi.Vec3(0.5, 0.5, 0.5)
+
+        if self.do_rand:
+            self._prepare_rand_params()
+            self.sample_rand_params()
+
+            dog_rigid_shape_props = self.gym.get_asset_rigid_shape_properties(a1)
+            ball_rigid_shape_props = self.gym.get_asset_rigid_shape_properties(
+                asset_ball
+            )
+            wall_rigid_shape_props = self.gym.get_asset_rigid_shape_properties(
+                asset_wall
+            )
+
         for i in range(self.num_envs):
             # create env instance
             env_ptr = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
+
+            if self.do_rand:
+                for s in range(4):  # four legs and feets
+                    for b in range(4):  # 5 bodies each side
+                        dog_rigid_shape_props[1 + 4 * s + b].restitution = (
+                            self.cfg["env"]["random_params"]["restitution"]["range_low"]
+                            + (
+                                self.cfg["env"]["random_params"]["restitution"][
+                                    "range_high"
+                                ]
+                                - self.cfg["env"]["random_params"]["restitution"][
+                                    "range_low"
+                                ]
+                            )
+                            * self.restitution_rand_params[i, s].item()
+                        )
+                        dog_rigid_shape_props[1 + 4 * s + b].friction = (
+                            self.cfg["env"]["random_params"]["friction"]["range_low"]
+                            + (
+                                self.cfg["env"]["random_params"]["friction"][
+                                    "range_high"
+                                ]
+                                - self.cfg["env"]["random_params"]["friction"][
+                                    "range_low"
+                                ]
+                            )
+                            * self.friction_rand_params[i, s].item()
+                        )
+
+                self.gym.set_asset_rigid_shape_properties(a1, dog_rigid_shape_props)
+
             a1_handle = self.gym.create_actor(
                 env_ptr, a1, start_pose, "a1", i, 0b010, 0
             )
+
+            # post randomization for a1
+            if self.do_rand:
+                if i == 0:
+                    self.default_mass = self.gym.get_actor_rigid_body_properties(
+                        env_ptr, a1_handle
+                    )[0].mass
+                # Rigid
+                rigid_props = self.gym.get_actor_rigid_body_properties(
+                    env_ptr, a1_handle
+                )
+                rigid_props[0].mass = (
+                    self.default_mass
+                    + self.payload_rand_params[i, 0].item()
+                    * (
+                        self.cfg["env"]["random_params"]["payload"]["range_high"]
+                        - self.cfg["env"]["random_params"]["payload"]["range_low"]
+                    )
+                    + self.cfg["env"]["random_params"]["payload"]["range_low"]
+                )
+                rigid_props[0].com = gymapi.Vec3(0.0, 0.0, 0)
+                rigid_props[0].com = gymapi.Vec3(
+                    self.com_rand_params[i, 0]
+                    * (
+                        self.cfg["env"]["random_params"]["com"]["range_high"]
+                        - self.cfg["env"]["random_params"]["com"]["range_low"]
+                    )
+                    + self.cfg["env"]["random_params"]["com"]["range_low"]
+                    + self.cfg["env"]["random_params"]["com"]["x_offset"],
+                    self.com_rand_params[i, 1]
+                    * (
+                        self.cfg["env"]["random_params"]["com"]["range_high"]
+                        - self.cfg["env"]["random_params"]["com"]["range_low"]
+                    )
+                    + self.cfg["env"]["random_params"]["com"]["range_low"],
+                    self.com_rand_params[i, 2]
+                    * (
+                        self.cfg["env"]["random_params"]["com"]["range_high"]
+                        - self.cfg["env"]["random_params"]["com"]["range_low"]
+                    )
+                    + self.cfg["env"]["random_params"]["com"]["range_low"],
+                )
+
+                self.gym.set_actor_rigid_body_properties(
+                    env_ptr, a1_handle, rigid_props, recomputeInertia=True
+                )
+
+                self.gym.set_actor_dof_properties(env_ptr, a1_handle, dof_props)
 
             self.gym.set_actor_dof_properties(env_ptr, a1_handle, dof_props)
             self.gym.enable_actor_dof_force_sensors(env_ptr, a1_handle)
@@ -698,6 +856,25 @@ class Go1WallKicker(VecTask):
                 color_goal = gymapi.Vec3(c[0], c[1], c[2])
 
             if self.add_real_ball:
+                if self.do_rand:
+                    ball_rigid_shape_props[0].restitution = (
+                        self.cfg["env"]["random_params"]["ball_restitution"][
+                            "range_low"
+                        ]
+                        + (
+                            self.cfg["env"]["random_params"]["ball_restitution"][
+                                "range_high"
+                            ]
+                            - self.cfg["env"]["random_params"]["ball_restitution"][
+                                "range_low"
+                            ]
+                        )
+                        * self.ball_restitution_rand_params[i, 0].item()
+                    )
+                    self.gym.set_asset_rigid_shape_properties(
+                        asset_ball, ball_rigid_shape_props
+                    )
+
                 ball_handle = self.gym.create_actor(
                     env_ptr,
                     asset_ball,
@@ -708,22 +885,22 @@ class Go1WallKicker(VecTask):
                     1,
                 )
 
-                this_ball_props = self.gym.get_actor_rigid_shape_properties(
-                    env_ptr, ball_handle
-                )
-                this_ball_props[0].rolling_friction = 0.1
-                this_ball_props[0].restitution = 0.9
-                self.gym.set_actor_rigid_shape_properties(
-                    env_ptr, ball_handle, this_ball_props
-                )
+                if self.do_rand:
+                    this_ball_phy_props = self.gym.get_actor_rigid_body_properties(
+                        env_ptr, ball_handle
+                    )
+                    this_ball_phy_props[0].mass = (
+                        self.cfg["env"]["random_params"]["ball_mass"]["range_low"]
+                        + (
+                            self.cfg["env"]["random_params"]["ball_mass"]["range_high"]
+                            - self.cfg["env"]["random_params"]["ball_mass"]["range_low"]
+                        )
+                        * self.ball_mass_rand_params[i, 0].item()
+                    )
 
-                this_ball_phy_props = self.gym.get_actor_rigid_body_properties(
-                    env_ptr, ball_handle
-                )
-                this_ball_phy_props[0].mass = self.ball_mass
-                self.gym.set_actor_rigid_body_properties(
-                    env_ptr, ball_handle, this_ball_phy_props
-                )
+                    self.gym.set_actor_rigid_body_properties(
+                        env_ptr, ball_handle, this_ball_phy_props
+                    )
 
                 self.gym.set_rigid_body_color(
                     env_ptr, ball_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color
@@ -750,6 +927,25 @@ class Go1WallKicker(VecTask):
                 )
                 self.goal_handles.append(goal_handle)
 
+                if self.do_rand:
+                    wall_rigid_shape_props[0].restitution = (
+                        self.cfg["env"]["random_params"]["wall_restitution"][
+                            "range_low"
+                        ]
+                        + (
+                            self.cfg["env"]["random_params"]["wall_restitution"][
+                                "range_high"
+                            ]
+                            - self.cfg["env"]["random_params"]["wall_restitution"][
+                                "range_low"
+                            ]
+                        )
+                        * self.wall_restitution_rand_params[i, 0].item()
+                    )
+                    self.gym.set_asset_rigid_shape_properties(
+                        asset_wall, wall_rigid_shape_props
+                    )
+
                 # set wall for each env
                 wall_handle = self.gym.create_actor(
                     env_ptr,
@@ -760,14 +956,14 @@ class Go1WallKicker(VecTask):
                     0b100,
                     1,
                 )  # can be asset box
-                this_wall_props = self.gym.get_actor_rigid_shape_properties(
-                    env_ptr, wall_handle
-                )
-                this_wall_props[0].rolling_friction = 0.1
-                this_wall_props[0].restitution = 0.99
-                self.gym.set_actor_rigid_shape_properties(
-                    env_ptr, wall_handle, this_wall_props
-                )
+
+                # this_wall_props = self.gym.get_actor_rigid_shape_properties(
+                #     env_ptr, wall_handle
+                # )
+                # this_wall_props[0].restitution = 1.1
+                # self.gym.set_actor_rigid_shape_properties(
+                #     env_ptr, wall_handle, this_wall_props
+                # )
 
                 self.gym.set_rigid_body_color(
                     env_ptr,
@@ -778,12 +974,6 @@ class Go1WallKicker(VecTask):
                 )
                 self.wall_handles.append(wall_handle)
 
-            # gymutil.draw_lines(sphere_geom, self.gym, self.viewer, env_ptr, gymapi.Transform(0,1,2))
-
-            # set color for each go1
-            self.gym.reset_actor_materials(
-                env_ptr, a1_handle, gymapi.MESH_VISUAL_AND_COLLISION
-            )
             self.gym.set_rigid_body_color(
                 env_ptr, a1_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, color
             )
@@ -825,7 +1015,7 @@ class Go1WallKicker(VecTask):
     def add_cam(self, env_ptr, a1_handle):
         camera_properties = gymapi.CameraProperties()
         camera_properties.horizontal_fov = self.cam_range
-        camera_properties.enable_tensors = True
+        camera_properties.enable_tensors = False
         camera_properties.width = self.image_width
         camera_properties.height = self.image_height
 
@@ -973,6 +1163,16 @@ class Go1WallKicker(VecTask):
         if len(goal_env_ids) > 0:
             self.reset_only_target(goal_env_ids)
 
+        if self.rand_push:
+            push_ids = (
+                (self.progress_buf % self.rand_push_length == 0)
+                .nonzero(as_tuple=False)
+                .flatten()
+            )
+
+            if len(push_ids) > 0:
+                self._push_robots(push_ids)
+
         self.is_first_buf[:] = False
         env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(
             -1
@@ -997,8 +1197,13 @@ class Go1WallKicker(VecTask):
         self.compute_reset()
         self.compute_reward(self.actions)
 
+        if self.do_rand and self.step_counter % self.random_frec == 0:
+            self._randomize_dof_props()
+
         if self.pixel_obs or self.have_cam_window:
             self.compute_pixels()
+
+        self.step_counter += 1
 
     def compute_pixels(self):
         self.frame_count += 1
@@ -1296,7 +1501,7 @@ class Go1WallKicker(VecTask):
             cat_list.append(ball_states_p)
         if "ball_2d_close" in self.cfg["env"]["state_observations"]:
             ball_is_close = torch.norm(ball_states_p, dim=1) < 0.5
-            ball_close_2d = ball_states_p[:, 0:2]
+            ball_close_2d = ball_states_p[:, 0:2].clone()
             ball_close_2d[~ball_is_close, :] = -1.0
             cat_list.append(ball_close_2d)
         if "ball_states_v" in self.cfg["env"]["state_observations"]:
@@ -1357,6 +1562,9 @@ class Go1WallKicker(VecTask):
 
         obs = torch.cat(cat_list, dim=-1)
 
+        if self.add_noise:
+            obs += (2 * torch.rand_like(obs) - 1) * self.noise_vec
+
         self.obs_buf[:] = obs
 
         if self.obs_history:
@@ -1384,6 +1592,36 @@ class Go1WallKicker(VecTask):
                 priv_list.append(base_quat)
             if "ball_event" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.is_back.unsqueeze(1).to(torch.float32))
+
+            if "dof_stiff" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.dof_stiff_rand_params)
+
+            if "dof_damp" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.dof_damping_rand_params)
+
+            if "dof_calib" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.dof_calib_rand_params)
+
+            if "payload" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.payload_rand_params)
+
+            if "com" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.com_rand_params)
+
+            if "friction" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.friction_rand_params)
+
+            if "restitution" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.restitution_rand_params)
+
+            if "ball_mass" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_mass_rand_params)
+
+            if "ball_restitution" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_restitution_rand_params)
+
+            if "wall_restitution" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.wall_restitution_rand_params)
 
             if not self.cfg["env"]["empty_privilege"]:
                 self.privilige_buffer[:] = torch.cat(priv_list, dim=-1)
@@ -1739,3 +1977,50 @@ class Go1WallKicker(VecTask):
         self.desired_contact_states[:, 1] = smoothing_multiplier_FR
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
+
+    def _push_robots(self, env_ids):
+        """Random pushes the robots. Emulates an impulse by setting a randomized base velocity."""
+        # print("pushing robots", env_ids)
+
+        self.root_states[env_ids * 4, 7:9] += torch_rand_float(
+            -self.max_push_vel, self.max_push_vel, (len(env_ids), 2), device=self.device
+        )  # lin vel x/y
+
+        self.deferred_set_actor_root_state_tensor_indexed(env_ids * 4)
+
+    def _randomize_dof_props(self):
+        print("=== randomize properties of the environment")
+        self.dof_stiff_rand_params = torch.rand(
+            (self.num_envs, self.num_dof), device=self.device
+        )
+        self.dof_damping_rand_params = torch.rand(
+            (self.num_envs, self.num_dof), device=self.device
+        )
+        self.dof_calib_rand_params = torch.rand(
+            (self.num_envs, self.num_dof), device=self.device
+        )
+
+        for i in range(self.num_envs):
+            actor_handle = self.a1_handles[i]
+            env_handle = self.envs[i]
+            # DOF
+            dof_props = self.gym.get_actor_dof_properties(env_handle, actor_handle)
+            # print("==== dof_props:", dof_props)
+            for s in range(self.num_dof):
+                dof_props["stiffness"][s] = (
+                    self.cfg["env"]["random_params"]["stiffness"]["range_low"]
+                    + (
+                        self.cfg["env"]["random_params"]["stiffness"]["range_high"]
+                        - self.cfg["env"]["random_params"]["stiffness"]["range_low"]
+                    )
+                    * self.dof_stiff_rand_params[i, s].item()
+                )
+                dof_props["damping"][s] = (
+                    self.cfg["env"]["random_params"]["damping"]["range_low"]
+                    + (
+                        self.cfg["env"]["random_params"]["damping"]["range_high"]
+                        - self.cfg["env"]["random_params"]["damping"]["range_low"]
+                    )
+                    * self.dof_damping_rand_params[i, s].item()
+                )
+            self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)

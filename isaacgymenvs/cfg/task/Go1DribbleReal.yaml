@@ -45,6 +45,19 @@ env:
     ball_states_v: 3 # can be in world frame, because have yaw
     ball_states_p: 3
 
+    dof_stiff: 12
+    dof_damp: 12
+    dof_calib: 12
+    payload: 1
+    com: 3
+    friction: 4
+    restitution: 4
+
+    ball_mass: 1
+    ball_restitution: 1
+
+    ball_drag: 1
+
   make_sound_dataset: false
   sound_dataset_dir: "./dataset/"
 

@@ -7,7 +7,11 @@ env:
   numEnvs: ${resolve_default:8000,${...num_envs}}
   envSpacing: 2. # [m]
 
-  wandb_extra_log: True
+  SID: true
+  SID_input: "./dataset/input_sequence_600.csv"
+  SID_save_dir: "./dataset/output.csv"
+
+  wandb_extra_log: false
   wandb_extra_log_period: 8000
 
   randomization: true
@@ -222,7 +226,7 @@ env:
     dofVelocityScale: 0.05
 
     # episode length in seconds
-    episodeLength_s: 20
+    episodeLength_s: 610 # 20
 
     curriculum:
       resample_s: 5

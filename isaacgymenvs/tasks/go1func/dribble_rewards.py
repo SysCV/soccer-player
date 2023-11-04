@@ -13,6 +13,14 @@ def wrap_to_pi(angles):
     return angles
 
 
+# @ torch.jit.script
+def quat_apply_yaw(quat, vec):
+    quat_yaw = quat.clone().view(-1, 4)
+    quat_yaw[:, :2] = 0.0
+    quat_yaw = normalize(quat_yaw)
+    return quat_apply(quat_yaw, vec)
+
+
 class RewardTerms:
     def __init__(self, env: Go1Dribbler):
         self.env = env
@@ -144,7 +152,9 @@ class RewardTerms:
         )
 
         delta_dribbling_robot_ball_vel = 1.0
-        robot_ball_vec = self.env.true_object_local_pos[:, 0:2] - FR_HIP_positions[:, 0:2]
+        robot_ball_vec = (
+            self.env.true_object_local_pos[:, 0:2] - FR_HIP_positions[:, 0:2]
+        )
         d_robot_ball = robot_ball_vec / torch.norm(robot_ball_vec, dim=-1).unsqueeze(
             dim=-1
         )
@@ -255,3 +265,201 @@ class RewardTerms:
         rew_vel_angle_tracking = 1.0 - angle_diff_in_pi / (torch.pi**2)
         # print("rew_vel_angle_tracking: ", rew_vel_angle_tracking)
         return rew_vel_angle_tracking
+
+    def _reward_feet_clearance(self):
+        phases = 1 - torch.abs(
+            1.0 - torch.clip((self.env.foot_indices * 2.0) - 1.0, 0.0, 1.0) * 2.0
+        )
+        foot_height = (self.env.foot_positions[:, :, 2]).view(
+            self.env.num_envs, -1
+        )  # - reference_heights
+        target_height = (
+            self.env.reward_params["feet_clearance"]["height"] * phases + 0.02
+        )  # offset for foot radius 2cm
+        rew_foot_clearance = torch.square(target_height - foot_height) * (
+            1 - self.env.desired_contact_states
+        )
+        return torch.sum(rew_foot_clearance, dim=1)
+
+    def _reward_raibert_heuristic_self(self):
+        cur_footsteps_translated = (
+            self.env.foot_positions - self.env.base_pos.unsqueeze(1)
+        )
+        # print("foot_pos: ", self.env.foot_positions)
+        footsteps_in_body_frame = torch.zeros(
+            self.env.num_envs, 4, 3, device=self.env.device
+        )
+        for i in range(4):
+            footsteps_in_body_frame[:, i, :] = quat_apply_yaw(
+                quat_conjugate(self.env.base_quat), cur_footsteps_translated[:, i, :]
+            )
+
+            # nominal positions: [FR, FL, RR, RL]
+            # TODO: in body frame is [FL, FR, RL, RR]? Now is right
+            desired_stance_width = 0.3
+            desired_ys_nom = torch.tensor(
+                [
+                    desired_stance_width / 2,
+                    -desired_stance_width / 2,
+                    desired_stance_width / 2,
+                    -desired_stance_width / 2,
+                ],
+                device=self.env.device,
+            ).unsqueeze(0)
+
+            desired_stance_length = 0.45
+            desired_xs_nom = torch.tensor(
+                [
+                    desired_stance_length / 2,
+                    desired_stance_length / 2,
+                    -desired_stance_length / 2,
+                    -desired_stance_length / 2,
+                ],
+                device=self.env.device,
+            ).unsqueeze(0)
+
+        # print("foot_step: ", footsteps_in_body_frame[:, :, 0:3])
+
+        # raibert offsets
+        duration = self.env.cfg["env"]["gait_condition"]["duration"]
+        # foot_indices_rh = torch.where(
+        #     self.env.foot_indices <= duration,
+        #     0.5 * self.env.foot_indices / duration,
+        #     (1 - 0.5 * (1 - self.env.foot_indices) / (1 - duration)),
+        # )
+        foot_indices_rh = self.env.foot_indices
+        phases = torch.abs(1.0 - (foot_indices_rh * 2.0)) * 1.0 - 0.5
+        frequencies = self.env.frequencies
+        # x_vel_des = self.env.commands[:, 0:1]
+        # yaw_vel_des = self.env.commands[:, 2:3]
+
+        base_lin_vel = quat_rotate_inverse(
+            self.env.root_states[::2, 3:7], self.env.root_states[::2, 7:10]
+        )
+        base_ang_vel = quat_rotate_inverse(
+            self.env.root_states[::2, 3:7], self.env.root_states[::2, 10:13]
+        )
+        x_vel_des = base_lin_vel[:, 0:1]
+        y_vel_des = base_ang_vel[:, 2:3] * desired_stance_length / 2
+        desired_ys_offset = phases * y_vel_des * (duration / frequencies.unsqueeze(1))
+        desired_ys_offset[:, 2:4] *= -1
+        desired_xs_offset = phases * x_vel_des * (duration / frequencies.unsqueeze(1))
+
+        desired_ys_nom = desired_ys_nom + desired_ys_offset
+        desired_xs_nom = desired_xs_nom + desired_xs_offset
+
+        desired_footsteps_body_frame = torch.cat(
+            (desired_xs_nom.unsqueeze(2), desired_ys_nom.unsqueeze(2)), dim=2
+        )
+
+        # print("x_vel: ", x_vel_des)
+        # print("phases: ", phases)
+        # print("p_desir: ", desired_footsteps_body_frame)
+
+        err_raibert_heuristic = torch.abs(
+            desired_footsteps_body_frame - footsteps_in_body_frame[:, :, 0:2]
+        )
+
+        err_raibert_heuristic[self.env.ball_near_feets, :] = 0.0
+
+        reward = torch.sum(torch.square(err_raibert_heuristic), dim=(1, 2))
+
+        return reward
+
+    def _reward_raibert_heuristic_PID(self):
+        self.env.compute_PID_commands()
+        cur_footsteps_translated = (
+            self.env.foot_positions - self.env.base_pos.unsqueeze(1)
+        )
+        # print("foot_pos: ", self.env.foot_positions)
+        footsteps_in_body_frame = torch.zeros(
+            self.env.num_envs, 4, 3, device=self.env.device
+        )
+        for i in range(4):
+            footsteps_in_body_frame[:, i, :] = quat_apply_yaw(
+                quat_conjugate(self.env.base_quat), cur_footsteps_translated[:, i, :]
+            )
+
+            # nominal positions: [FR, FL, RR, RL]
+            # TODO: in body frame is [FL, FR, RL, RR]? Now is right
+            desired_stance_width = 0.3
+            desired_ys_nom = torch.tensor(
+                [
+                    desired_stance_width / 2,
+                    -desired_stance_width / 2,
+                    desired_stance_width / 2,
+                    -desired_stance_width / 2,
+                ],
+                device=self.env.device,
+            ).unsqueeze(0)
+
+            desired_stance_length = 0.45
+            desired_xs_nom = torch.tensor(
+                [
+                    desired_stance_length / 2,
+                    desired_stance_length / 2,
+                    -desired_stance_length / 2,
+                    -desired_stance_length / 2,
+                ],
+                device=self.env.device,
+            ).unsqueeze(0)
+
+        # print("foot_step: ", footsteps_in_body_frame[:, :, 0:3])
+
+        # raibert offsets
+        duration = self.env.cfg["env"]["gait_condition"]["duration"]
+        # foot_indices_rh = torch.where(
+        #     self.env.foot_indices <= duration,
+        #     0.5 * self.env.foot_indices / duration,
+        #     (1 - 0.5 * (1 - self.env.foot_indices) / (1 - duration)),
+        # )
+        foot_indices_rh = self.env.foot_indices
+        phases = torch.abs(1.0 - (foot_indices_rh * 2.0)) * 1.0 - 0.5
+        frequencies = self.env.frequencies
+        # x_vel_des = self.env.commands[:, 0:1]
+        # yaw_vel_des = self.env.commands[:, 2:3]
+
+        # base_lin_vel = quat_rotate_inverse(
+        #     self.env.root_states[::2, 3:7], self.env.root_states[::2, 7:10]
+        # )
+        base_ang_vel = quat_rotate_inverse(
+            self.env.root_states[::2, 3:7], self.env.root_states[::2, 10:13]
+        )
+        x_vel_des = self.env.v_dog_local[:, 0:1]
+        y_vel_des = base_ang_vel[:, 2:3] * desired_stance_length / 2
+        desired_ys_offset = phases * y_vel_des * (duration / frequencies.unsqueeze(1))
+        desired_ys_offset[:, 2:4] *= -1
+        desired_xs_offset = phases * x_vel_des * (duration / frequencies.unsqueeze(1))
+
+        desired_ys_nom = desired_ys_nom + desired_ys_offset
+        desired_xs_nom = desired_xs_nom + desired_xs_offset
+
+        desired_footsteps_body_frame = torch.cat(
+            (desired_xs_nom.unsqueeze(2), desired_ys_nom.unsqueeze(2)), dim=2
+        )
+
+        # print("x_vel: ", x_vel_des)
+        # print("phases: ", phases)
+        # print("p_desir: ", desired_footsteps_body_frame)
+
+        err_raibert_heuristic = torch.abs(
+            desired_footsteps_body_frame - footsteps_in_body_frame[:, :, 0:2]
+        )
+
+        err_raibert_heuristic[self.env.ball_near_feets, :] = 0.0
+
+        reward = torch.sum(torch.square(err_raibert_heuristic), dim=(1, 2))
+
+        return reward
+
+    def _reward_tracking_lin_vel_PID(self):
+        # Tracking of linear velocity commands (xy axes)
+        lin_vel_error = torch.sum(
+            torch.square(self.env.v_dog_target[:, :2] - self.env.base_lin_vel[:, :2]),
+            dim=1,
+        )
+        # print("command_v", self.env.commands[10:15, :2])
+        # print("base_v", self.env.base_lin_vel[10:15, :2])
+        return torch.exp(
+            -lin_vel_error / self.env.reward_params["tracking_lin_vel_PID"]["sigma"]
+        )

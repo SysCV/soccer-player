@@ -482,6 +482,9 @@ class Go1Dribbler(VecTask):
         self.foot_velocities = self.rigid_body_state.view(
             self.num_envs, (self.num_bodies + 1), 13
         )[:, self.feet_indices, 7:10]
+        self.foot_positions = self.rigid_body_state.view(
+            self.num_envs, (self.num_bodies + 1), 13
+        )[:, self.feet_indices, 0:3]
 
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
@@ -518,10 +521,6 @@ class Go1Dribbler(VecTask):
         # the differce with monitor is that these are not wrapped gym-state tensors
 
         self.step_counter = 0
-
-        self.ball_drags = torch.zeros(
-            self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False
-        )
 
         self.force_tensor = torch.zeros(
             (self.num_envs, self.num_bodies + 1, 3),
@@ -596,6 +595,13 @@ class Go1Dribbler(VecTask):
             self.dof_pos, dtype=torch.float, device=self.device, requires_grad=False
         )
 
+        self.ball_near_feets = torch.zeros(
+            (self.num_envs, 4),
+            dtype=torch.bool,
+            device=self.device,
+            requires_grad=False,
+        )
+
         for i in range(self.cfg["env"]["numActions"]):
             name = self.dof_names[i]
             angle = self.named_default_joint_angles[name]
@@ -624,6 +630,21 @@ class Go1Dribbler(VecTask):
             torch.zeros_like(self.dof_pos, device=self.device)
             for i in range(self.cfg["env"]["action_lag_step"] + 1)
         ]
+
+        self.ball_pos = torch.zeros(
+            self.num_envs, 3, device=self.device, dtype=torch.float, requires_grad=False
+        )
+
+        self.ball_p_buffer = [
+            torch.zeros_like(self.ball_pos, device=self.device)
+            for i in range(self.cfg["env"]["vision_lag_step"] + 1)
+        ]
+
+        self.ball_v_buffer = [
+            torch.zeros_like(self.ball_pos, device=self.device)
+            for i in range(self.cfg["env"]["vision_lag_step"] + 1)
+        ]
+
         self.actions = torch.zeros(
             self.num_envs,
             self.num_actions,
@@ -675,6 +696,19 @@ class Go1Dribbler(VecTask):
             self.num_envs, dtype=torch.float, device=self.device
         )
 
+        # for PID
+        self.v_dog_target = torch.zeros(
+            self.num_envs, 3, dtype=torch.float, device=self.device
+        )
+
+        self.forward_vec = to_torch([1.0, 0.0, 0.0], device=self.device).repeat(
+            (self.num_envs, 1)
+        )
+
+        self.omega_dog_local = torch.zeros(
+            self.num_envs, dtype=torch.float, device=self.device
+        )
+
     def create_sim(self):
         self.up_axis_idx = 2  # index of up axis: Y=1, Z=2
         self.sim = super().create_sim(
@@ -700,7 +734,7 @@ class Go1Dribbler(VecTask):
         # plane_params.rolling_friction = 0.6
         self.gym.add_ground(self.sim, plane_params)
 
-    def prepare_rand_params(self):
+    def _prepare_rand_params(self):
         self.dof_stiff_rand_params = torch.zeros(
             self.num_envs, self.num_dof, device=self.device, dtype=torch.float
         )
@@ -722,10 +756,13 @@ class Go1Dribbler(VecTask):
         self.com_rand_params = torch.zeros(self.num_envs, 3, device=self.device)
 
         self.ball_mass_rand_params = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.float
+            self.num_envs, 1, device=self.device, dtype=torch.float
         )
         self.ball_restitution_rand_params = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.float
+            self.num_envs, 1, device=self.device, dtype=torch.float
+        )
+        self.ball_drag_rand_params = torch.zeros(
+            self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False
         )
 
     def _create_envs(self, num_envs, spacing, num_per_row):
@@ -733,9 +770,6 @@ class Go1Dribbler(VecTask):
             os.path.dirname(os.path.abspath(__file__)), "../../assets"
         )
         asset_file = "urdf/go1/urdf/go1.urdf"
-        # asset_path = os.path.join(asset_root, asset_file)
-        # asset_root = os.path.dirname(asset_path)
-        # asset_file = os.path.basename(asset_path)
 
         asset_options = gymapi.AssetOptions()
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
@@ -790,13 +824,13 @@ class Go1Dribbler(VecTask):
 
         asset_options = gymapi.AssetOptions()
         asset_options.density = 0.1
-        asset_ball = self.gym.create_sphere(self.sim, 0.11, asset_options)
+        asset_ball = self.gym.create_sphere(self.sim, 0.095, asset_options)
 
         # randomization params, here because some param can only be applied
         # during set up
 
         if self.do_rand:
-            self.prepare_rand_params()
+            self._prepare_rand_params()
             self.sample_rand_params()
 
             dog_rigid_shape_props = self.gym.get_asset_rigid_shape_properties(a1)
@@ -924,7 +958,7 @@ class Go1Dribbler(VecTask):
                                 "range_low"
                             ]
                         )
-                        * self.ball_restitution_rand_params[i].item()
+                        * self.ball_restitution_rand_params[i, 0].item()
                     )
                     self.gym.set_asset_rigid_shape_properties(
                         asset_ball, ball_rigid_shape_props
@@ -950,7 +984,7 @@ class Go1Dribbler(VecTask):
                             self.cfg["env"]["random_params"]["ball_mass"]["range_high"]
                             - self.cfg["env"]["random_params"]["ball_mass"]["range_low"]
                         )
-                        * self.ball_mass_rand_params[i].item()
+                        * self.ball_mass_rand_params[i, 0].item()
                     )
 
                     self.gym.set_actor_rigid_body_properties(
@@ -1009,9 +1043,9 @@ class Go1Dribbler(VecTask):
         self.restitution_rand_params = torch.rand(
             (self.num_envs, 4), device=self.device
         )
-        self.ball_mass_rand_params = torch.rand((self.num_envs), device=self.device)
+        self.ball_mass_rand_params = torch.rand((self.num_envs, 1), device=self.device)
         self.ball_restitution_rand_params = torch.rand(
-            (self.num_envs), device=self.device
+            (self.num_envs, 1), device=self.device
         )
 
     def add_cam(self, env_ptr, a1_handle):
@@ -1218,7 +1252,8 @@ class Go1Dribbler(VecTask):
             self.reset_idx(env_ids)
             self.is_first_buf[env_ids] = True
 
-        self._randomize_ball_state()
+        if self.cfg["env"]["random_params"]["ball_reset"]["enable"]:
+            self._randomize_ball_state()
 
         self.set_actor_root_state_tensor_indexed()
 
@@ -1369,11 +1404,20 @@ class Go1Dribbler(VecTask):
         self.foot_velocities = self.rigid_body_state.view(
             self.num_envs, (self.num_bodies + 1), 13
         )[:, self.feet_indices, 7:10]
+        self.foot_positions = self.rigid_body_state.view(
+            self.num_envs, (self.num_bodies + 1), 13
+        )[:, self.feet_indices, 0:3]
 
         # state data
         self.base_quat = self.root_states[::2, 3:7]
         self.base_pos = self.root_states[::2, 0:3]
         self.ball_pos = self.root_states[1::2, 0:3]
+
+        self.ball_near_feets = (
+            torch.norm(self.foot_positions - self.ball_pos.unsqueeze(1), dim=2) < 0.2
+        )  # ball radius is 0.1
+
+        # print("=== ball near feet:", self.ball_near_feets)
 
         self.robot_ball_dis = torch.norm(
             self.ball_pos - self.base_pos, dim=1, keepdim=False
@@ -1393,9 +1437,20 @@ class Go1Dribbler(VecTask):
         self.true_object_local_pos[:, 2] = 0.0 * torch.ones(
             self.num_envs, dtype=torch.float, device=self.device, requires_grad=False
         )
+        self.true_object_local_vel = quat_rotate_inverse(
+            self.base_quat, self.root_states[1::2, 7:10]
+        )
+
+        self.ball_p_buffer = self.ball_p_buffer[1:] + [
+            self.true_object_local_pos.clone().to(self.device)
+        ]
+
+        self.ball_v_buffer = self.ball_v_buffer[1:] + [
+            self.true_object_local_vel.clone().to(self.device)
+        ]
 
         self.object_local_pos = self.simulate_ball_pos_delay(
-            self.true_object_local_pos, self.object_local_pos
+            self.ball_p_buffer[0], self.object_local_pos
         )
         self.object_lin_vel = self.root_states[1::2, 7:10]
 
@@ -1415,7 +1470,11 @@ class Go1Dribbler(VecTask):
             name = self.reward_names[i]
             # print("name:", name, "scale:", self.reward_scales[name])
             rew = self.reward_functions[i]() * self.reward_scales[name]
-            if torch.sum(rew) >= 0:
+            if name == "raibert_heuristic_PID":
+                self.neg_shaper = rew
+            elif name == "tracking_lin_vel_PID":
+                self.positive_shaper = rew
+            elif torch.sum(rew) >= 0:
                 self.rew_pos += rew
             elif torch.sum(rew) <= 0:
                 self.rew_neg += rew
@@ -1439,7 +1498,13 @@ class Go1Dribbler(VecTask):
         else:
             self.rew_buf = self.rew_pos + self.rew_neg
 
-        # print(episode_cumulative)
+        episode_cumulative["total_unshaped"] = self.rew_buf.clone()
+
+        if self.PID_shaper:
+            self.rew_buf[:] = torch.exp(self.neg_shaper / self.sigma_rew_neg) * (
+                self.rew_buf + self.positive_shaper
+            )
+
         extra_info["episode_cumulative"] = episode_cumulative
         self.extras.update(extra_info)
 
@@ -1465,12 +1530,13 @@ class Go1Dribbler(VecTask):
         # self.target_reset_buf was set in the reward function
 
     def compute_observations(self):
+        # self.compute_PID_commands()
         root_states = self.root_states[:, :]
-        # if self.step_counter < 50 * 10:
-        #     self.commands[:, 0] = 1.0
+        # if self.step_counter < 50 * 7:
+        #     self.commands[:, 0] = -1.0
         #     self.commands[:, 1] = 0.0
         # else:
-        #     self.commands[:, 0] = -1.0
+        #     self.commands[:, 0] = 1.0
         #     self.commands[:, 1] = 0.0
         # print("commands:", self.commands)
         commands = self.commands
@@ -1556,23 +1622,80 @@ class Go1Dribbler(VecTask):
             )
 
         if self.obs_privilige:
+            # base_lin_vel: 3
+            # base_ang_vel: 3
+
+            # ball_states_v: 3 # can be in world frame, because have yaw
+            # ball_states_p: 3
+
+            # dof_stiff: 12
+            # dof_damp: 12
+            # dof_calib: 12
+            # payload: 1
+            # com: 3
+            # friction: 4
+            # restitution: 4
+
+            # ball_mass: 1
+            # ball_restitution: 1
+
+            # ball_drag: 1
             priv_list = []
             if "base_lin_vel" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(base_lin_vel)
             if "base_ang_vel" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(base_ang_vel)
 
-            if "ball_states_p" in self.cfg["env"]["priviledgeStates"]:
-                priv_list.append(ball_states_p)
-            if "ball_states_v" in self.cfg["env"]["priviledgeStates"]:
-                priv_list.append(ball_states_v)
+            if "ball_states_p_0" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_p_buffer[0])
+            if "ball_states_v_0" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_v_buffer[0])
 
-            if "base_pose" in self.cfg["env"]["priviledgeStates"]:
-                priv_list.append(base_pose)
-            if "base_quat" in self.cfg["env"]["priviledgeStates"]:
-                priv_list.append(base_quat)
-            if "ball_event" in self.cfg["env"]["priviledgeStates"]:
-                priv_list.append(self.is_back.unsqueeze(1).to(torch.float32))
+            # 0,4,9,14
+            if "ball_states_p_4" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_p_buffer[4])
+            if "ball_states_v_4" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_v_buffer[4])
+
+            if "ball_states_p_9" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_p_buffer[9])
+            if "ball_states_v_9" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_v_buffer[9])
+
+            if "ball_states_p_14" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_p_buffer[14])
+            if "ball_states_v_14" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_v_buffer[14])
+
+            if "dof_stiff" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.dof_stiff_rand_params)
+
+            if "dof_damp" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.dof_damping_rand_params)
+
+            if "dof_calib" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.dof_calib_rand_params)
+
+            if "payload" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.payload_rand_params)
+
+            if "com" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.com_rand_params)
+
+            if "friction" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.friction_rand_params)
+
+            if "restitution" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.restitution_rand_params)
+
+            if "ball_mass" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_mass_rand_params)
+
+            if "ball_restitution" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_restitution_rand_params)
+
+            if "ball_drag" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_drag_rand_params)
 
             if not self.cfg["env"]["empty_privilege"]:
                 self.privilige_buffer[:] = torch.cat(priv_list, dim=-1)
@@ -1600,7 +1723,10 @@ class Go1Dribbler(VecTask):
         # prepare list of functions
         self.reward_functions = []
         self.reward_names = []
+        self.PID_shaper = False
         for name, scale in self.reward_scales.items():
+            if name == "raibert_heuristic_PID":
+                self.PID_shaper = True
             if name == "termination":
                 continue
 
@@ -1641,6 +1767,30 @@ class Go1Dribbler(VecTask):
                 "ep_timesteps",
             ]
         }
+
+    def compute_PID_commands(self):
+        delta_v = self.ball_lin_vel_xy_world - self.commands[:, 0:2]
+        p_dog_target = (
+            self.ball_pos[:, :2]
+            + delta_v * self.reward_params["raibert_heuristic_PID"]["k1"]
+        )
+        self.v_dog_target[:, 0:2] = (
+            p_dog_target - self.base_pos[:, :2]
+        ) * self.reward_params["raibert_heuristic_PID"]["k2"] + (
+            self.ball_lin_vel_xy_world - self.base_lin_vel[:, :2]
+        ) * self.reward_params[
+            "raibert_heuristic_PID"
+        ][
+            "k3"
+        ]
+        self.v_dog_local = quat_rotate_inverse(self.base_quat, self.v_dog_target)
+
+        # forward = quat_apply(self.base_quat, self.forward_vec)
+        # robot_heading = torch.atan2(forward[:, 1], forward[:, 0])
+        # command_heading = torch.atan2(self.v_dog_local[:, 1], self.v_dog_local[:, 0])
+        # self.omega_dog_local[:] = torch.clip(
+        #     0.5 * wrap_to_pi(command_heading - robot_heading), -1.0, 1.0
+        # )
 
     def reset(self):
         """Is called only once when environment starts to provide the first observations.
@@ -1776,6 +1926,12 @@ class Go1Dribbler(VecTask):
 
         for i in range(len(self.lag_buffer)):
             self.lag_buffer[i][env_ids, :] = 0
+
+        for i in range(len(self.ball_p_buffer)):
+            self.ball_p_buffer[i][env_ids, :] = 0
+
+        for i in range(len(self.ball_v_buffer)):
+            self.ball_v_buffer[i][env_ids, :] = 0
 
         # self.commands_x[env_ids] = torch_rand_float(
         #     self.command_x_range[0],
@@ -1938,7 +2094,7 @@ class Go1Dribbler(VecTask):
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
 
     def _randomize_ball_drag(self):
-        self.ball_drags[:, :] = torch_rand_float(
+        self.ball_drag_rand_params[:, :] = torch_rand_float(
             self.cfg["env"]["random_params"]["ball_drag"]["range_low"],
             self.cfg["env"]["random_params"]["ball_drag"]["range_high"],
             (self.num_envs, 1),
@@ -1947,9 +2103,10 @@ class Go1Dribbler(VecTask):
 
     def _apply_drag_force(self):
         self.force_tensor[:, self.num_bodies, :2] = (
-            -self.ball_drags
-            * torch.square(self.ball_lin_vel_xy_world[:, :2])
-            * torch.sign(self.ball_lin_vel_xy_world[:, :2])
+            -self.ball_drag_rand_params
+            # * torch.square(self.ball_lin_vel_xy_world[:, :2])
+            # * torch.sign(self.ball_lin_vel_xy_world[:, :2])
+            * self.ball_lin_vel_xy_world[:, :2]
         )
         self.gym.apply_rigid_body_force_tensors(
             self.sim,

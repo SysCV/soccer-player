@@ -58,7 +58,9 @@ def get_rotation_matrix_from_rpy(rpy):
 
 
 class StateEstimator:
-    def __init__(self, lc, use_cameras=True, use_gst=False, double_cam=False):
+    def __init__(
+        self, lc, use_cameras=True, use_gst=False, double_cam=False, device="cuda:0"
+    ):
         # reverse legs
         self.double_cam = double_cam
         self.joint_idxs = [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]
@@ -141,7 +143,7 @@ class StateEstimator:
         if use_gst:
             Gst.init(None)
             self.model = YOLO(
-                "/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/dataset/best_72.pt"
+                "/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/dataset/best_99.pt"
             )
 
             self.gst_video = Video(9200, 3)
@@ -554,10 +556,12 @@ class StateEstimator:
         result = self.model(self.gst_video.frame())  # TODO: fix this
         return result
 
-    def get_ball_estimation(self, plot=False, print_state=False):
+    def get_ball_estimation(self, plot_img=False, print_state=False):
         assert self.double_cam, "Double camera not enabled"
         # pic_list = [self.gst_video.frame(), self.gst_video2.frame()]
-        result = self.model([self.gst_video.frame(), self.gst_video2.frame()])
+        result = self.model(
+            [self.gst_video.frame(), self.gst_video2.frame()], device="cuda:1"
+        )
 
         r1 = list(result)[0]
         boxes1 = r1.boxes.xyxy
@@ -601,7 +605,7 @@ class StateEstimator:
         else:
             self.estimator.update_cam2()
 
-        if plot:
+        if plot_img:
             im_array1 = r1.plot()  # plot a BGR numpy array of predictions
             cv2.imshow("result1", im_array1)
             im_array2 = r2.plot()  # plot a BGR numpy array of predictions

@@ -117,6 +117,13 @@ class Go1(VecTask):
         force_render,
     ):
         self.cfg = cfg
+
+        if self.cfg["env"]["SID"]:
+            self.input_sequence = np.loadtxt(self.cfg["env"]["SID_input"])
+            self.sid_input_length = self.input_sequence.shape[0]
+            self.output_sequence = np.zeros((self.sid_input_length))
+            self.sid_step = 0
+
         self.wandb_extra_log = self.cfg["env"]["wandb_extra_log"]
         self.wandb_log_period = self.cfg["env"]["wandb_extra_log_period"]
 
@@ -1020,6 +1027,21 @@ class Go1(VecTask):
         dof_vel_scale = self.dof_vel_scale
 
         dof_pos_scaled = (self.dof_pos - self.default_dof_pos) * dof_pos_scale
+
+        # if sid, then do command override
+        if self.cfg["env"]["SID"]:
+            self.commands[:, 0] = self.input_sequence[self.sid_step]
+            self.commands[:, 1] = 0
+            self.commands[:, 2] = 0
+            self.output_sequence[self.sid_step] = self.base_lin_vel[0, 0].item()
+            self.sid_step += 1
+            if self.sid_step % 500 == 0:
+                print("=== sid_step: {}s".format(self.sid_step / 50))
+            if self.sid_step == self.sid_input_length:
+                plt.plot(self.input_sequence)
+                plt.plot(self.output_sequence)
+                # plt.show()
+                np.savetxt(self.cfg["env"]["SID_save_dir"], self.output_sequence)
 
         commands_scaled = self.commands * torch.tensor(
             [lin_vel_scale, lin_vel_scale, ang_vel_scale],

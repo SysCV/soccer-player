@@ -33,3 +33,4 @@ outputs/
 /isaacgymenvs/wandb
 /isaacgymenvs/offline_data
 isaacgymenvs/dataset/*
+isaacgymenvs/saved_frames

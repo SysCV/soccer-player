@@ -39,7 +39,7 @@ class BallEstimator:
         fy = 3.8594489809074821e02
         cx = 4.3923707519180203e02
         cy = 4.0432640383775964e02
-        phi_real_ball = 0.22
+        phi_real_ball = 0.20
 
         px, py = self.get_box_center(xmin, ymin, xmax, ymax)
         x_range, y_range = self.get_box_range(xmin, ymin, xmax, ymax)

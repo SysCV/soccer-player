@@ -4,7 +4,7 @@ name: Go1WallKicker
 physics_engine: ${..physics_engine}
 
 env:
-  numEnvs: ${resolve_default:32000,${...num_envs}}
+  numEnvs: ${resolve_default:8000,${...num_envs}}
   envSpacing: 2. # [m]
 
   cameraSensorPlt: false
@@ -31,18 +31,26 @@ env:
     last_actions: 12
     gait_sin_indict: 4
 
-    # ball_states_p: 3
-    # goal_pose: 3
+    ball_states_p: 3
     # ball_2d_close: 2
 
     pixel_bbox_ball: 4
-    pixel_bbox_goal: 4
+    # pixel_bbox_goal: 4
 
-    # base_lin_vel: 3
-    # base_ang_vel: 3
-    # ball_states_v: 3
-    # base_quat: 4
-    # ball_event: 1
+
+  add_noise: true
+  obs_noise:
+    projected_gravity: 0.05
+    dof_pos: 0.01
+    dof_vel: 0.1
+    last_actions: 0
+    gait_sin_indict: 0
+
+    ball_states_p: 0.05
+    # ball_2d_close: 0.05
+
+    pixel_bbox_ball: 0.005
+    # pixel_bbox_goal: 0.005
 
   pixel_observations:
     enable: false
@@ -62,11 +70,23 @@ env:
 
     ball_states_v: 3
     ball_states_p: 3
-    goal_pose: 3
+    # goal_pose: 3
 
     base_quat: 4
     ball_event: 1
-    # total: 3 + 3 + 3 + 3 + 4 + 1 = 17
+
+    dof_stiff: 12
+    dof_damp: 12
+    dof_calib: 12
+    payload: 1
+    com: 3
+    friction: 4
+    restitution: 4
+
+    ball_mass: 1
+    ball_restitution: 1
+    wall_restitution: 1
+    # total: 3 + 3 + 3 + 3 + 4 + 1 + 12 + 12 + 12 + 1 + 3 + 4 + 4 + 1 + 1 + 1 = 68
 
 
   actions_num: 12
@@ -83,9 +103,59 @@ env:
   clipActions: 1.0
 
   plane:
-    staticFriction: 0.6 # [-]
-    dynamicFriction: 0.6 # [-]
-    restitution: 0.4 # [-]
+    staticFriction: 0.0 # [-]
+    dynamicFriction: 0.0 # [-]
+    restitution: 0.1 # [-]
+
+  randomization: true
+  randomization_freq: 10000 # 1s = 50 steps
+
+  random_params:
+    dof_calib:
+      enable: true
+      range_low: -0.02
+      range_high: 0.02
+    stiffness:
+      enable: true
+      range_low: 19.
+      range_high: 21.
+    damping:
+      enable: true
+      range_low: 0.45
+      range_high: 0.55
+    friction:
+      enable: true
+      range_low: 0.1
+      range_high: 2.0
+    restitution:
+      enable: true
+      range_low: 0.1
+      range_high: 1.3
+    com:
+      enable: true
+      range_low: -0.15
+      range_high: 0.15
+      x_offset: 0.05
+    payload:
+      enable: true
+      range_low: -1.0
+      range_high: 2.0
+    push:
+      enable: true
+      interval_s: 7
+      max_vel: 0.5
+    ball_mass:
+      enable: true
+      range_low: 0.3
+      range_high: 0.5
+    ball_restitution:
+      enable: true
+      range_low: 0.3
+      range_high: 1.0
+    wall_restitution:
+      enable: true
+      range_low: 0.5
+      range_high: 1.0
 
   baseInitState:
     pos: [0.0, 0.0, 0.33] # x,y,z [m]
@@ -95,7 +165,7 @@ env:
 
   goalInitState:
     pos: [3.0, 0.0, 0.15] # x,y,z [m]
-    randomPosRange: [0.0, 2.0, 0.0]
+    randomPosRange: [0.0, 0.0, 0.0]
 
   wallInitState:
     pos: [3.01, 0.0, 0.5] # x,y,z [m]
@@ -245,7 +315,7 @@ sim:
     num_velocity_iterations: 1
     contact_offset: 0.02
     rest_offset: 0.0
-    bounce_threshold_velocity: 0.2
+    bounce_threshold_velocity: 0.1
     max_depenetration_velocity: 100.0
     default_buffer_size_multiplier: 5.0
     max_gpu_contact_pairs: 8388608 # 8*1024*1024
@@ -257,71 +327,5 @@ task:
   target_goal: True
   have_wall: False
   actor_per_environment: 4
-  randomize: False
-  randomization_params:
-    frequency: 600 # Define how many environment steps between generating new randomizations
-    observations:
-      range: [0, .002] # range for the white noise
-      operation: "additive"
-      distribution: "gaussian"
-    actions:
-      range: [0., .02]
-      operation: "additive"
-      distribution: "gaussian"
-    sim_params:
-      gravity:
-        range: [0, 0.4]
-        operation: "additive"
-        distribution: "gaussian"
-        schedule: "linear" # "linear" will linearly interpolate between no rand and max rand
-        schedule_steps: 3000
-    actor_params:
-      a1:
-        #        color: False
-        rigid_body_properties:
-          mass:
-            range: [0.5, 1.5]
-            operation: "scaling"
-            distribution: "uniform"
-            setup_only: True # Property will only be randomized once before simulation is started. See Domain Randomization Documentation for more info.
-            schedule: "linear" # "linear" will linearly interpolate between no rand and max rand
-            schedule_steps: 3000
-        rigid_shape_properties:
-          friction:
-            num_buckets: 500
-            range: [0.7, 1.3]
-            operation: "scaling"
-            distribution: "uniform"
-            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 3000
-          restitution:
-            range: [0., 0.7]
-            operation: "scaling"
-            distribution: "uniform"
-            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 3000
-        dof_properties:
-          damping:
-            range: [0.5, 1.5]
-            operation: "scaling"
-            distribution: "uniform"
-            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 3000
-          stiffness:
-            range: [0.5, 1.5]
-            operation: "scaling"
-            distribution: "uniform"
-            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 3000
-          lower:
-            range: [0, 0.01]
-            operation: "additive"
-            distribution: "gaussian"
-            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 3000
-          upper:
-            range: [0, 0.01]
-            operation: "additive"
-            distribution: "gaussian"
-            schedule: "linear" # "linear" will scale the current random sample by `min(current num steps, schedule_steps) / schedule_steps`
-            schedule_steps: 3000
+  randomize: False # this is build in randomization
+  

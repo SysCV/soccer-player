@@ -271,7 +271,7 @@ class RewardTerms:
             )
 
             # nominal positions: [FR, FL, RR, RL]
-            # TODO: in body frame is [FL, FR, RL, RR]?
+            # TODO: in body frame is [FL, FR, RL, RR]? Now is right
             desired_stance_width = 0.3
             desired_ys_nom = torch.tensor(
                 [
