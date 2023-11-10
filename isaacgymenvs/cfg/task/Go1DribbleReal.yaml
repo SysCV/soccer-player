@@ -8,7 +8,7 @@ env:
   envSpacing: 2. # [m]
 
   obs_history: true
-  history_length: 15
+  history_length: 25
 
   action_lag_step: 0
 
@@ -42,8 +42,14 @@ env:
     base_lin_vel: 3
     base_ang_vel: 3
 
-    ball_states_v: 3 # can be in world frame, because have yaw
-    ball_states_p: 3
+    ball_states_v_0: 3 
+    ball_states_p_0: 3
+
+    ball_states_v_4: 3 
+    ball_states_p_4: 3
+
+    ball_states_v_9: 3
+    ball_states_p_9: 3
 
     dof_stiff: 12
     dof_damp: 12

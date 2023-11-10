@@ -143,7 +143,7 @@ class StateEstimator:
         if use_gst:
             Gst.init(None)
             self.model = YOLO(
-                "/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/dataset/best_99.pt"
+                "/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/dataset/best_99.pt",
             )
 
             self.gst_video = Video(9200, 3)
@@ -556,11 +556,13 @@ class StateEstimator:
         result = self.model(self.gst_video.frame())  # TODO: fix this
         return result
 
-    def get_ball_estimation(self, plot_img=False, print_state=False):
+    def get_ball_estimation(self, plot_img=False, print_state=False, print_speed=False):
         assert self.double_cam, "Double camera not enabled"
         # pic_list = [self.gst_video.frame(), self.gst_video2.frame()]
         result = self.model(
-            [self.gst_video.frame(), self.gst_video2.frame()], device="cuda:1"
+            [self.gst_video.frame(), self.gst_video2.frame()],
+            device="cuda:0",
+            verbose=True,
         )
 
         r1 = list(result)[0]
@@ -611,6 +613,10 @@ class StateEstimator:
             im_array2 = r2.plot()  # plot a BGR numpy array of predictions
             cv2.imshow("result2", im_array2)
             cv2.waitKey(1)
+
+        if print_speed:
+            print(r1.speed)
+            print(r2.speed)
 
         estimated_position = self.estimator.get_estimation_result()
         if print_state:

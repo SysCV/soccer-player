@@ -48,9 +48,11 @@ class Video:
             "! application/x-rtp, payload=96 ! rtph264depay ! h264parse ! avdec_h264"
         )
         # Python don't have nibble, convert YUV nibbles (4-4-4) to OpenCV standard BGR bytes (8-8-8)
-        self.video_decode = (
-            "! decodebin ! videoconvert ! video/x-raw,format=(string)BGR ! videoconvert"
-        )
+        # self.video_decode = (
+        #     "! decodebin ! videoconvert ! video/x-raw,format=(string)BGR ! videoconvert"
+        # )
+
+        self.video_decode = "! videoconvert ! video/x-raw,format=(string)BGR"
         # Create a sink to get data
         self.video_sink_conf = "! appsink emit-signals=true sync=false max-buffers=2 drop=true name=appsink{}".format(
             self.app_index
@@ -173,7 +175,7 @@ if __name__ == "__main__":
     Gst.init(None)
     # GObject.threads_init()
 
-    video1 = Video(9200, 3)
+    video1 = Video(9200, 3)  # 9200
     video2 = Video(9209, 1)
 
     print("Initialising stream...")
@@ -190,131 +192,126 @@ if __name__ == "__main__":
 
     while True:
         # Wait for the next frame to become available
-        if video1.frame_available():
-            # Only retrieve and display a frame if it's new
-            frame1 = video1.frame()
-            cv2.imshow("origin-0", frame1)
-            frame2 = video2.frame()
-            cv2.imshow("origin-9", frame2)
+        # Only retrieve and display a frame if it's new
 
-            import os
+        import os
 
-            # Create a directory to save the frames
-            if not os.path.exists("./saved_frames_blue"):
-                os.makedirs("./saved_frames_blue")
+        # Create a directory to save the frames
+        if not os.path.exists("./saved_frames_blue"):
+            os.makedirs("./saved_frames_blue")
 
-            # Initialize a counter to keep track of the frame number
-            frame_num = 0
-            save_frames = False
+        # Initialize a counter to keep track of the frame number
+        frame_num = 0
+        save_frames = False
 
-            while True:
-                # Wait for the next frame to become available
-                if video1.frame_available():
-                    # Only retrieve and display a frame if it's new
-                    frame1 = video1.frame()
-                    # Convert fisheye to equirectangular
-                    cv2.imshow("origin-0", frame1)
+        while True:
+            # Wait for the next frame to become available
+            if video1.frame_available():
+                # Only retrieve and display a frame if it's new
+                frame1 = video1.frame()
+                # Convert fisheye to equirectangular
+                cv2.imshow("origin-0", frame1)
 
-                    # Display the frame
+                # Display the frame
 
-                    # Save the frame as a picture if save_frames is True
-                    if save_frames:
-                        print("saving...", frame_num)
-                        cv2.imwrite(
-                            "./saved_frames/frame{}.jpg".format(frame_num),
-                            frame1,
-                        )
-                        frame_num += 1
+                # Save the frame as a picture if save_frames is True
+                if save_frames:
+                    print("saving...", frame_num)
+                    cv2.imwrite(
+                        "./saved_frames/frame{}.jpg".format(frame_num),
+                        frame1,
+                    )
+                    frame_num += 1
 
-                if video2.frame_available():
-                    # Only retrieve and display a frame if it's new
-                    frame2 = video2.frame()
-                    cv2.imshow("origin-9", frame2)
+            if video2.frame_available():
+                # Only retrieve and display a frame if it's new
+                frame2 = video2.frame()
+                cv2.imshow("origin-9", frame2)
 
-                    # Display the frame
+                # Display the frame
 
-                    # Save the frame as a picture if save_frames is True
-                    if save_frames:
-                        print("saving...", frame_num)
-                        cv2.imwrite(
-                            "./saved_frames/frame{}.jpg".format(frame_num),
-                            frame2,
-                        )
-                        frame_num += 1
+                # Save the frame as a picture if save_frames is True
+                if save_frames:
+                    print("saving...", frame_num)
+                    cv2.imwrite(
+                        "./saved_frames/frame{}.jpg".format(frame_num),
+                        frame2,
+                    )
+                    frame_num += 1
 
-                # frame1 = video1.frame()
-                # frame2 = video2.frame()
+            # frame1 = video1.frame()
+            # frame2 = video2.frame()
 
-                # result = model.predict([frame1, frame2])
+            # result = model.predict([frame1, frame2])
 
-                # r1 = list(result)[0]
-                # boxes1 = r1.boxes.xyxy
-                # confidences1 = r1.boxes.conf
-                # # pick the box with highest confidence higher than 0.5
+            # r1 = list(result)[0]
+            # boxes1 = r1.boxes.xyxy
+            # confidences1 = r1.boxes.conf
+            # # pick the box with highest confidence higher than 0.5
 
-                # im_array1 = r1.plot()  # plot a BGR numpy array of predictions
-                # cv2.imshow("result1", im_array1)
+            # im_array1 = r1.plot()  # plot a BGR numpy array of predictions
+            # cv2.imshow("result1", im_array1)
 
-                # valid_indices1 = (confidences1 > 0.5).nonzero()
-                # pixel_bbox_ball = None
-                # if valid_indices1.size(0) > 0:
-                #     _, max_index1 = torch.max(confidences1[valid_indices1], dim=0)
+            # valid_indices1 = (confidences1 > 0.5).nonzero()
+            # pixel_bbox_ball = None
+            # if valid_indices1.size(0) > 0:
+            #     _, max_index1 = torch.max(confidences1[valid_indices1], dim=0)
 
-                #     # Get the corresponding box from the valid indices
-                #     xyxy1 = boxes1[valid_indices1[max_index1]].squeeze()
-                #     print(xyxy1)
-                #     estimator.update_cam1(
-                #         xyxy1[0].item(),
-                #         xyxy1[1].item(),
-                #         xyxy1[2].item(),
-                #         xyxy1[3].item(),
-                #     )
-                # else:
-                #     estimator.update_cam1()
+            #     # Get the corresponding box from the valid indices
+            #     xyxy1 = boxes1[valid_indices1[max_index1]].squeeze()
+            #     print(xyxy1)
+            #     estimator.update_cam1(
+            #         xyxy1[0].item(),
+            #         xyxy1[1].item(),
+            #         xyxy1[2].item(),
+            #         xyxy1[3].item(),
+            #     )
+            # else:
+            #     estimator.update_cam1()
 
-                # r2 = list(result)[1]
-                # boxes2 = r2.boxes.xyxy
-                # confidences2 = r2.boxes.conf
-                # # pick the box with highest confidence higher than 0.5
+            # r2 = list(result)[1]
+            # boxes2 = r2.boxes.xyxy
+            # confidences2 = r2.boxes.conf
+            # # pick the box with highest confidence higher than 0.5
 
-                # im_array2 = r2.plot()  # plot a BGR numpy array of predictions
-                # cv2.imshow("result2", im_array2)
+            # im_array2 = r2.plot()  # plot a BGR numpy array of predictions
+            # cv2.imshow("result2", im_array2)
 
-                # valid_indices2 = (confidences2 > 0.5).nonzero()
-                # pixel_bbox_ball = None
-                # if valid_indices2.size(0) > 0:
-                #     _, max_index2 = torch.max(confidences2[valid_indices2], dim=0)
+            # valid_indices2 = (confidences2 > 0.5).nonzero()
+            # pixel_bbox_ball = None
+            # if valid_indices2.size(0) > 0:
+            #     _, max_index2 = torch.max(confidences2[valid_indices2], dim=0)
 
-                #     # Get the corresponding box from the valid indices
-                #     xyxy2 = boxes2[valid_indices2[max_index2]].squeeze()
-                #     estimator.update_cam2(
-                #         xyxy2[0].item(),
-                #         xyxy2[1].item(),
-                #         xyxy2[2].item(),
-                #         xyxy2[3].item(),
-                #     )
+            #     # Get the corresponding box from the valid indices
+            #     xyxy2 = boxes2[valid_indices2[max_index2]].squeeze()
+            #     estimator.update_cam2(
+            #         xyxy2[0].item(),
+            #         xyxy2[1].item(),
+            #         xyxy2[2].item(),
+            #         xyxy2[3].item(),
+            #     )
 
-                # else:
-                #     estimator.update_cam2()
+            # else:
+            #     estimator.update_cam2()
 
-                # estimated_position = estimator.get_estimation_result(sep_print=True)
-                # print("=====================================")
-                # print("Estimated Position:", estimated_position[:2])
+            # estimated_position = estimator.get_estimation_result(sep_print=True)
+            # print("=====================================")
+            # print("Estimated Position:", estimated_position[:2])
 
-                # Wait for a key press and check if the user wants to quit or save frames
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("q"):
-                    break
-                elif key == ord("s"):
-                    # Start saving frames after a key press
-                    save_frames = True
-                    print("press saving")
-                elif key == ord("x"):
-                    # Stop saving frames after a second key press
-                    save_frames = False
-                    print("press stop")
+            # Wait for a key press and check if the user wants to quit or save frames
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
+            elif key == ord("s"):
+                # Start saving frames after a key press
+                save_frames = True
+                print("press saving")
+            elif key == ord("x"):
+                # Stop saving frames after a second key press
+                save_frames = False
+                print("press stop")
 
-            # Clean up
-            cv2.destroyAllWindows()
+        # Clean up
+        cv2.destroyAllWindows()
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break

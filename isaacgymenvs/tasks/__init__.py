@@ -29,6 +29,7 @@
 
 from .go1 import Go1
 from .go1_dribble import Go1Dribbler
+from .go1_dribble_test import Go1DribblerTest
 from .go1_ball_shoot import Go1BallShoot
 from .go1_wall_kicker import Go1WallKicker
 from .a1ball_shoot import A1ballShoot
@@ -97,6 +98,7 @@ def resolve_allegro_kuka_two_arms(cfg, *args, **kwargs):
 isaacgym_task_map = {
     "Go1": Go1,
     "Go1Dribble": Go1Dribbler,
+    "Go1DribbleTest": Go1DribblerTest,
     "Go1Fix": Go1,
     "Go1WallKicker": Go1WallKicker,
     "Go1BallShoot": Go1BallShoot,

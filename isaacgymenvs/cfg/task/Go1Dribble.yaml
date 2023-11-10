@@ -13,10 +13,10 @@ env:
   cameraSensorPlt: false
 
   obs_history: true
-  history_length: 15
+  history_length: 25
 
   action_lag_step: 1
-  vision_lag_step: 15 # 300ms
+  vision_lag_step: 6 # 100ms - 133ms
 
   gait_condition:
     # trotting [0.5,0,0] pacing [0,0,0.5]
@@ -72,14 +72,11 @@ env:
     ball_states_v_0: 3 
     ball_states_p_0: 3
 
-    ball_states_v_4: 3 
-    ball_states_p_4: 3
+    ball_states_v_3: 3 
+    ball_states_p_3: 3
 
-    ball_states_v_9: 3
-    ball_states_p_9: 3
-
-    ball_states_v_14: 3 
-    ball_states_p_14: 3
+    ball_states_v_6: 3
+    ball_states_p_6: 3
 
     dof_stiff: 12
     dof_damp: 12
@@ -88,7 +85,6 @@ env:
     com: 3
     friction: 4
     restitution: 4
-
     ball_mass: 1
     ball_restitution: 1
 
@@ -155,10 +151,10 @@ env:
     ball_drag:
       enable: true
       range_low: -0.1
-      range_high: 0.5 # 1.5
+      range_high: 0.5 # 0.5
       interval_s: 19
     ball_reset:
-      enable: true
+      enable: false
       vel: 0.3
       prob_vel: 2e-4
       pos: 1.0
@@ -236,9 +232,9 @@ env:
       tracking_contacts_shaped_vel: 4.0
 
       # raibert_heuristic_self: -10.0
-      raibert_heuristic_PID: -10.0
+      # raibert_heuristic_PID: -10.0
       # feet_clearance: -30.0
-      tracking_lin_vel_PID: 1.0 # make sure it is after raibert_heuristic_PID
+      # tracking_lin_vel_PID: 2.0 # make sure it is after raibert_heuristic_PID
 
       # dribbling ball
       dribbling_robot_ball_vel: 0.5

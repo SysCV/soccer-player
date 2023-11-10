@@ -1,10 +1,10 @@
 # used to create the object
-name: Go1Dribble
+name: Go1DribbleTest
 
 physics_engine: ${..physics_engine}
 
 env:
-  numEnvs: ${resolve_default:8000,${...num_envs}}
+  numEnvs: ${resolve_default:10,${...num_envs}}
   envSpacing: 2. # [m]
 
   wandb_extra_log: false
@@ -16,6 +16,7 @@ env:
   history_length: 15
 
   action_lag_step: 1
+  vision_lag_step: 0 # 100ms - 133ms
 
   gait_condition:
     # trotting [0.5,0,0] pacing [0,0,0.5]
@@ -29,7 +30,6 @@ env:
   vision_receive_prob: 0.7
 
   state_observations:
-
     projected_gravity: 3
     dof_pos: 12
     dof_vel: 12
@@ -69,8 +69,14 @@ env:
     base_lin_vel: 3
     base_ang_vel: 3
 
-    ball_states_v: 3 # can be in world frame, because have yaw
-    ball_states_p: 3
+    ball_states_v_0: 3 
+    ball_states_p_0: 3
+
+    # ball_states_v_3: 3 
+    # ball_states_p_3: 3
+
+    # ball_states_v_6: 3
+    # ball_states_p_6: 3
 
     dof_stiff: 12
     dof_damp: 12
@@ -79,7 +85,6 @@ env:
     com: 3
     friction: 4
     restitution: 4
-
     ball_mass: 1
     ball_restitution: 1
 
@@ -145,11 +150,11 @@ env:
       range_high: 1.0
     ball_drag:
       enable: true
-      range_low:  -0.1
-      range_high: 0.5 # 1.5
+      range_low: 0.0
+      range_high: 0.2 # 0.5
       interval_s: 19
     ball_reset:
-      enable: true
+      enable: false
       vel: 0.3
       prob_vel: 2e-4
       pos: 1.0
@@ -157,11 +162,22 @@ env:
 
   randomization: true
   randomization_freq: 10000 # 1s = 50 steps
-    
 
   terminateCondition:
     robot_ball_max: 3.0
     ball_speed_max: 3.0
+
+  terrain:
+    type: 'trimesh' #plane trimesh
+    staticFriction: 1.0  # [-]
+    dynamicFriction: 1.0  # [-]
+    restitution: 0.        # [-]
+    # rough terrain only:
+    mapLength: 80.
+    mapWidth: 80.
+    # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
+    # tri mesh only:
+    slopeTreshold: 0.5
 
   plane:
     staticFriction: 0.0 # [-]
@@ -228,9 +244,9 @@ env:
       tracking_contacts_shaped_vel: 4.0
 
       # raibert_heuristic_self: -10.0
-      raibert_heuristic_PID: -10.0
+      # raibert_heuristic_PID: -10.0
       # feet_clearance: -30.0
-      # tracking_lin_vel_PID: 1.0 # make sure it is after raibert_heuristic_PID
+      # tracking_lin_vel_PID: 2.0 # make sure it is after raibert_heuristic_PID
 
       # dribbling ball
       dribbling_robot_ball_vel: 0.5
@@ -280,7 +296,6 @@ env:
         tracking_contacts_shaped_force: 0.9
         tracking_contacts_shaped_vel: 0.9
       local_range: [0.4, 0.4]
-
 
   # viewer cam:
   viewer:

@@ -115,7 +115,7 @@ def wrap_to_pi(angles):
 from typing import Dict, Any, Tuple, List, Set
 
 
-class Go1Dribbler(VecTask):
+class Go1DribblerTest(VecTask):
     def __init__(
         self,
         cfg,
@@ -713,6 +713,26 @@ class Go1Dribbler(VecTask):
             self.num_envs, dtype=torch.float, device=self.device
         )
 
+    def _create_trimesh(self):
+        self.terrain = Terrain(self.cfg["env"]["terrain"], num_robots=self.num_envs)
+        tm_params = gymapi.TriangleMeshParams()
+        tm_params.nb_vertices = self.terrain.vertices.shape[0]
+        tm_params.nb_triangles = self.terrain.triangles.shape[0]
+        tm_params.transform.p.x = -self.cfg["env"]["terrain"]["mapWidth"] / 2
+        tm_params.transform.p.y = -self.cfg["env"]["terrain"]["mapLength"] / 2
+        tm_params.transform.p.z = 0.0
+        tm_params.static_friction = self.cfg["env"]["terrain"]["staticFriction"]
+        tm_params.dynamic_friction = self.cfg["env"]["terrain"]["dynamicFriction"]
+        tm_params.restitution = self.cfg["env"]["terrain"]["restitution"]
+
+        self.gym.add_triangle_mesh(
+            self.sim,
+            self.terrain.vertices.flatten(order="C"),
+            self.terrain.triangles.flatten(order="C"),
+            tm_params,
+        )
+        # self.height_samples = torch.tensor(self.terrain.heightsamples).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
+
     def create_sim(self):
         self.up_axis_idx = 2  # index of up axis: Y=1, Z=2
         self.sim = super().create_sim(
@@ -721,7 +741,11 @@ class Go1Dribbler(VecTask):
             self.physics_engine,
             self.sim_params,
         )
-        self._create_ground_plane()
+        if self.cfg["env"]["terrain"]["type"] == "trimesh":
+            self._create_trimesh()
+        else:
+            self._create_ground_plane()
+
         self._create_envs(
             self.num_envs, self.cfg["env"]["envSpacing"], int(np.sqrt(self.num_envs))
         )
@@ -1536,12 +1560,12 @@ class Go1Dribbler(VecTask):
     def compute_observations(self):
         # self.compute_PID_commands()
         root_states = self.root_states[:, :]
-        # if self.step_counter < 50 * 7:
-        #     self.commands[:, 0] = -1.0
-        #     self.commands[:, 1] = 0.0
-        # else:
-        #     self.commands[:, 0] = 1.0
-        #     self.commands[:, 1] = 0.0
+        if self.step_counter < 50 * 7:
+            self.commands[:, 0] = -1.0
+            self.commands[:, 1] = 0.0
+        else:
+            self.commands[:, 0] = 1.0
+            self.commands[:, 1] = 0.0
         # print("commands:", self.commands)
         commands = self.commands
         dof_pos = self.dof_pos
@@ -2244,3 +2268,83 @@ class Go1Dribbler(VecTask):
                     * self.dof_damping_rand_params[i, s].item()
                 )
             self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
+
+
+# terrain generator
+from isaacgym.terrain_utils import *
+
+
+class Terrain:
+    def __init__(self, cfg, num_robots) -> None:
+        self.horizontal_scale = 0.2
+        self.vertical_scale = 0.0000005
+        self.border_size = 1
+        self.num_per_env = 2
+        self.env_length = cfg["mapLength"]
+        self.env_width = cfg["mapWidth"]
+
+        self.env_rows = 1
+        self.env_cols = 1
+        self.num_maps = self.env_rows * self.env_cols
+        self.num_per_env = int(num_robots / self.num_maps)
+        self.env_origins = np.zeros((self.env_rows, self.env_cols, 3))
+
+        self.width_per_env_pixels = int(self.env_width / self.horizontal_scale)
+        self.length_per_env_pixels = int(self.env_length / self.horizontal_scale)
+
+        self.border = int(self.border_size / self.horizontal_scale)
+        self.tot_cols = int(self.env_cols * self.width_per_env_pixels) + 2 * self.border
+        self.tot_rows = (
+            int(self.env_rows * self.length_per_env_pixels) + 2 * self.border
+        )
+
+        self.height_field_raw = np.zeros((self.tot_rows, self.tot_cols), dtype=np.int16)
+        self.randomized_terrain()
+        self.heightsamples = self.height_field_raw
+        self.vertices, self.triangles = convert_heightfield_to_trimesh(
+            self.height_field_raw,
+            self.horizontal_scale,
+            self.vertical_scale,
+            cfg["slopeTreshold"],
+        )
+
+    def randomized_terrain(self):
+        for k in range(self.num_maps):
+            # Env coordinates in the world
+            (i, j) = np.unravel_index(k, (self.env_rows, self.env_cols))
+
+            # Heightfield coordinate system from now on
+            start_x = self.border + i * self.length_per_env_pixels
+            end_x = self.border + (i + 1) * self.length_per_env_pixels
+            start_y = self.border + j * self.width_per_env_pixels
+            end_y = self.border + (j + 1) * self.width_per_env_pixels
+
+            terrain = SubTerrain(
+                "terrain",
+                width=self.width_per_env_pixels,
+                length=self.width_per_env_pixels,
+                vertical_scale=self.vertical_scale,
+                horizontal_scale=self.horizontal_scale,
+            )
+            random_uniform_terrain(
+                terrain,
+                min_height=-0.1,
+                max_height=0.1,
+                step=0.05,
+                downsampled_scale=0.2,
+            )
+
+            self.height_field_raw[
+                start_x:end_x, start_y:end_y
+            ] = terrain.height_field_raw
+
+            env_origin_x = (i + 0.5) * self.env_length
+            env_origin_y = (j + 0.5) * self.env_width
+            x1 = int((self.env_length / 2.0 - 1) / self.horizontal_scale)
+            x2 = int((self.env_length / 2.0 + 1) / self.horizontal_scale)
+            y1 = int((self.env_width / 2.0 - 1) / self.horizontal_scale)
+            y2 = int((self.env_width / 2.0 + 1) / self.horizontal_scale)
+            env_origin_z = (
+                np.max(terrain.height_field_raw[x1:x2, y1:y2]) * self.vertical_scale
+            )
+            self.env_origins[i, j] = [env_origin_x, env_origin_y, env_origin_z]

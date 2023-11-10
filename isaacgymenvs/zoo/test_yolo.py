@@ -10,7 +10,7 @@ model = YOLO(
 )  # load a pretrained model (recommended for training)
 
 results = model.predict(
-    "https://ultralytics.com/images/bus.jpg", device="cuda:1", show=True
+    "./zoo/bus.jpg", device="cuda:1", show=True
 )  # predict on an image
 
 # results = model.predict(

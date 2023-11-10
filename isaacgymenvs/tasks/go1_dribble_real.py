@@ -639,7 +639,7 @@ class DribbleReal(VecTask):
         commands_scaled = commands[:, :2] * lin_vel_scale
 
         ball_3d = self.agents["hardware_closed_loop"].se.get_ball_estimation(
-            plot_img=False, print_state=False
+            plot_img=False, print_state=False, print_speed=False
         )
         ball_3d[2] = 0.0
 
