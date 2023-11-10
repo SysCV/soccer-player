@@ -16,7 +16,7 @@ env:
   history_length: 25
 
   action_lag_step: 1
-  vision_lag_step: 6 # 100ms - 133ms
+  vision_lag_step: 2 # 100ms - 133ms
 
   gait_condition:
     # trotting [0.5,0,0] pacing [0,0,0.5]
@@ -72,11 +72,17 @@ env:
     ball_states_v_0: 3 
     ball_states_p_0: 3
 
-    ball_states_v_3: 3 
-    ball_states_p_3: 3
+    ball_states_v_1: 3 
+    ball_states_p_1: 3
 
-    ball_states_v_6: 3
-    ball_states_p_6: 3
+    ball_states_v_2: 3
+    ball_states_p_2: 3
+
+    # ball_states_v_3: 3 
+    # ball_states_p_3: 3
+
+    # ball_states_v_6: 3
+    # ball_states_p_6: 3
 
     dof_stiff: 12
     dof_damp: 12

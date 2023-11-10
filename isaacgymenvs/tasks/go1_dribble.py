@@ -1677,6 +1677,16 @@ class Go1Dribbler(VecTask):
             if "ball_states_v_6" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.ball_v_buffer[6])
 
+            if "ball_states_p_1" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_p_buffer[1])
+            if "ball_states_v_1" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_v_buffer[1])
+
+            if "ball_states_p_2" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_p_buffer[2])
+            if "ball_states_v_2" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_v_buffer[2])
+
             if "dof_stiff" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.dof_stiff_rand_params)
 
