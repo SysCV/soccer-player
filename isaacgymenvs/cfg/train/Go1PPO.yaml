@@ -35,7 +35,6 @@ params:
   load_checkpoint: ${if:${...checkpoint},True,False} # flag which sets whether to load the checkpoint
   load_path: ${...checkpoint} # path to the checkpoint to load
 
-
   config:
     name: ${resolve_default:A1,${....experiment}}
     full_experiment_name: ${.name}
@@ -65,7 +64,7 @@ params:
     clip_value: True
     seq_len: 4 # only for rnn
     bounds_loss_coef: 0.001
-    # load_sigma: -1.0
+    load_sigma: -1.0
 
     max_epochs: ${resolve_default:2000,${....max_iterations}}
     save_best_after: 200
