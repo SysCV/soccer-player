@@ -93,6 +93,8 @@ env:
     restitution: 4
     ball_mass: 1
     ball_restitution: 1
+    gravity_offset: 3
+    base_height: 1
 
     ball_drag: 1
 
@@ -165,6 +167,11 @@ env:
       prob_vel: 2e-4
       pos: 1.0
       prob_pos: 1e-4
+    gravity:
+      enable: true
+      range_low: -0.8
+      range_high: 0.8
+      interval_s: 9
 
   randomization: true
   randomization_freq: 10000 # 1s = 50 steps
@@ -238,9 +245,9 @@ env:
       tracking_contacts_shaped_vel: 4.0
 
       # raibert_heuristic_self: -10.0
-      # raibert_heuristic_PID: -10.0
+      raibert_heuristic_PID: -10.0
       # feet_clearance: -30.0
-      # tracking_lin_vel_PID: 2.0 # make sure it is after raibert_heuristic_PID
+      tracking_lin_vel_PID: 2.0 # make sure it is after raibert_heuristic_PID
 
       # dribbling ball
       dribbling_robot_ball_vel: 0.5
@@ -305,7 +312,7 @@ sim:
   substeps: 2
   up_axis: "z"
   use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
-  gravity: [0.0, 0.0, -9.81]
+  gravity: [-0.5, 0.0, -9.81]
   physx:
     num_threads: ${....num_threads}
     solver_type: ${....solver_type}

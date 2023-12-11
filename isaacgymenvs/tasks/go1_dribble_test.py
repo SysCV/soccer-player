@@ -129,10 +129,6 @@ class Go1DribblerTest(VecTask):
         self.totall_episode = 0
         self.success_episode = 0
 
-        self.command_squence = torch.zeros(50 * 14)
-        self.velocity_squence = torch.zeros(50 * 14)
-        self.plot_step = 0
-
         self.cfg = cfg
 
         self.wandb_extra_log = self.cfg["env"]["wandb_extra_log"]
@@ -439,7 +435,7 @@ class Go1DribblerTest(VecTask):
         if self.headless == False:
             viewer_prop = gymapi.CameraProperties()
             viewer_prop.use_collision_geometry = True
-            viewer_prop.far_plane = 15.0
+            viewer_prop.far_plane = 30.0
             # subscribe to keyboard shortcuts
             self.viewer = self.gym.create_viewer(self.sim, viewer_prop)
             self.gym.subscribe_viewer_keyboard_event(
@@ -523,6 +519,12 @@ class Go1DribblerTest(VecTask):
     def create_self_buffers(self):
         # initialize some data used later on
         # the differce with monitor is that these are not wrapped gym-state tensors
+
+        if self.cfg["env"]["log_ate"]:
+            self.log_length = self.cfg["env"]["log_length"] * 24
+            self.command_squence = torch.zeros((self.log_length, self.num_envs, 2))
+            self.velocity_squence = torch.zeros((self.log_length, self.num_envs, 2))
+            self.plot_step = 0
 
         self.step_counter = 0
 
@@ -797,7 +799,7 @@ class Go1DribblerTest(VecTask):
         asset_root = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "../../assets"
         )
-        asset_file = "urdf/go1/urdf/go1.urdf"
+        asset_file = "urdf/go1/urdf/go1-visual-backup.urdf"
 
         asset_options = gymapi.AssetOptions()
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
@@ -1559,13 +1561,14 @@ class Go1DribblerTest(VecTask):
 
     def compute_observations(self):
         # self.compute_PID_commands()
+        # print("=== body height:", torch.mean(self.base_pos[:, 2]))
         root_states = self.root_states[:, :]
-        if self.step_counter < 50 * 7:
-            self.commands[:, 0] = -1.0
-            self.commands[:, 1] = 0.0
-        else:
-            self.commands[:, 0] = 1.0
-            self.commands[:, 1] = 0.0
+        # if self.step_counter < 50 * 7:
+        #     self.commands[:, 0] = -1.0
+        #     self.commands[:, 1] = 0.0
+        # else:
+        #     self.commands[:, 0] = 1.0
+        #     self.commands[:, 1] = 0.0
         # print("commands:", self.commands)
         commands = self.commands
         dof_pos = self.dof_pos
@@ -1649,17 +1652,6 @@ class Go1DribblerTest(VecTask):
                 (self.history_buffer[:, self.num_obs :], obs), dim=1
             )
 
-        # self.command_squence[self.plot_step] = self.commands[0, 0].item()
-        # self.velocity_squence[self.plot_step] = self.ball_lin_vel_xy_world[0, 0].item()
-
-        # self.plot_step += 1
-        # if self.plot_step >= 14 * 50:
-        #     # plot command together with velocity
-        #     plt.plot(self.command_squence)
-        #     plt.plot(self.velocity_squence)
-
-        #     plt.show()
-
         if self.obs_privilige:
             # base_lin_vel: 3
             # base_ang_vel: 3
@@ -1701,6 +1693,16 @@ class Go1DribblerTest(VecTask):
             if "ball_states_v_6" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.ball_v_buffer[6])
 
+            if "ball_states_p_1" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_p_buffer[1])
+            if "ball_states_v_1" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_v_buffer[1])
+
+            if "ball_states_p_2" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_p_buffer[2])
+            if "ball_states_v_2" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.ball_v_buffer[2])
+
             if "dof_stiff" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.dof_stiff_rand_params)
 
@@ -1734,6 +1736,86 @@ class Go1DribblerTest(VecTask):
             if not self.cfg["env"]["empty_privilege"]:
                 self.privilige_buffer[:] = torch.cat(priv_list, dim=-1)
                 # print("privilege buffer:", self.privilige_buffer)
+
+        if self.cfg["env"]["log_ate"]:
+            self.command_squence[self.plot_step, :, :] = self.commands[:, 0:2]
+            self.velocity_squence[self.plot_step, :, :] = self.ball_lin_vel_xy_world[
+                :, 0:2
+            ]
+            self.plot_step += 1
+            if self.plot_step >= self.log_length:
+                import pandas as pd
+
+                def log_data(file_name, env_name, pt_name, ate_error_tensor):
+                    # Convert the PyTorch tensor to a NumPy array
+                    ate_error_np = ate_error_tensor.numpy()
+
+                    # Define column names
+                    columns = [
+                        "env_name",
+                        "pt_name",
+                        "min",
+                        "q1",
+                        "median",
+                        "q3",
+                        "max",
+                    ]
+
+                    # Calculate statistics
+                    stats = [
+                        ate_error_np.min(),
+                        np.quantile(ate_error_np, 0.25),
+                        np.median(ate_error_np),
+                        np.quantile(ate_error_np, 0.75),
+                        ate_error_np.max(),
+                    ]
+
+                    # Prepare the row to be logged
+                    new_data = [env_name, pt_name] + stats
+
+                    # Load or create the DataFrame
+                    try:
+                        df = pd.read_csv(file_name)
+                    except FileNotFoundError:
+                        df = pd.DataFrame(columns=columns)
+
+                    # Check if the configuration env-pt already exists
+                    mask = (df["env_name"] == env_name) & (df["pt_name"] == pt_name)
+                    if mask.any():
+                        # Replace the existing row
+                        df.loc[mask] = new_data
+                    else:
+                        # Append a new row
+                        df = df.append(
+                            pd.Series(new_data, index=columns), ignore_index=True
+                        )
+
+                    # Save the updated DataFrame
+                    df.to_csv(file_name, index=False)
+
+                # compute ATE
+                ate = torch.norm(
+                    self.command_squence[0 : self.plot_step]
+                    - self.velocity_squence[0 : self.plot_step],
+                    dim=2,
+                )
+
+                self.plot_step = 0
+
+                log_data(
+                    self.cfg["env"]["log_file_name"],
+                    self.cfg["env"]["log_env_name"],
+                    self.cfg["env"]["log_pt_name"],
+                    ate,
+                )
+
+                print("=== boxplot logged. test end ===")
+                exit()
+                # plot command together with velocity
+                # plt.plot(self.command_squence)
+                # plt.plot(self.velocity_squence)
+
+                # plt.show()
 
     def _prepare_reward_function(self):
         """Prepares a list of reward functions, which will be called to compute the total reward.

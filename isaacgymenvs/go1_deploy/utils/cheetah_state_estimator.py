@@ -164,16 +164,16 @@ class StateEstimator:
         if double_cam:
             # Example usage:
             T1 = [
-                [0.0, 0.0, 1.0, 0.2911],
+                [0.0, 0.0, 1.0, 0.289],
                 [-1.0, 0.0, 0.0, -0.0125],
-                [0.0, -1.0, 0.0, 0.01625],
+                [0.0, -1.0, 0.0, 0.01675],
                 [0.0, 0.0, 0.0, 1.0],
             ]
 
             T2 = [
                 [0.0, -1.0, 0.0, -0.0825],
                 [-1.0, 0.0, 0.0, -0.0125],
-                [0.0, 0.0, -1.0, -0.056],
+                [0.0, 0.0, -1.0, -0.052],
                 [0.0, 0.0, 0.0, 1.0],
             ]
 
@@ -618,9 +618,9 @@ class StateEstimator:
             print(r1.speed)
             print(r2.speed)
 
-        estimated_position = self.estimator.get_estimation_result()
+        estimated_position = self.estimator.get_estimation_result(sep_print=print_state)
         if print_state:
-            print(estimated_position)
+            print("fused pos:", estimated_position)
         return estimated_position
 
     def poll(self, cb=None):

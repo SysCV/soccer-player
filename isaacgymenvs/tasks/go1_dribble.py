@@ -352,6 +352,10 @@ class Go1Dribbler(VecTask):
             self.cfg["env"]["random_params"]["ball_drag"]["interval_s"] / self.dt + 0.5
         )
 
+        self.gravity_rand_length = int(
+            self.cfg["env"]["random_params"]["gravity"]["interval_s"] / self.dt + 0.5
+        )
+
         self.ball_pos_prob = self.cfg["env"]["random_params"]["ball_reset"]["prob_pos"]
         self.ball_pos_reset = self.cfg["env"]["random_params"]["ball_reset"]["pos"]
         self.ball_vel_prob = self.cfg["env"]["random_params"]["ball_reset"]["prob_vel"]
@@ -626,9 +630,18 @@ class Go1Dribbler(VecTask):
         # self.initial_root_states[:] = to_torch(
         #     self.base_init_state, device=self.device, requires_grad=False
         # )
+        # self.gravity_vec = to_torch(
+        #     get_axis_params(-1.0, self.up_axis_idx), device=self.device
+        # ).repeat((self.num_envs, 1))
+
         self.gravity_vec = to_torch(
-            get_axis_params(-1.0, self.up_axis_idx), device=self.device
-        ).repeat((self.num_envs, 1))
+            self.cfg["sim"]["gravity"], device=self.device
+        ).repeat(
+            (self.num_envs, 1)
+        )  # TODO: here actually make gravity not a unit vector
+        self.gravity_offset_rand_params = torch.zeros_like(
+            self.gravity_vec, device=self.device
+        )
 
         self.lag_buffer = [
             torch.zeros_like(self.dof_pos, device=self.device)
@@ -1296,8 +1309,10 @@ class Go1Dribbler(VecTask):
         if self.pixel_obs or self.have_cam_window:
             self.compute_pixels()
 
-        if self.do_rand and self.step_counter % self.random_frec == 0:
+        if self.do_rand and self.step_counter % self.gravity_rand_length == 0:
             self.randomize_dof_props()
+            if self.cfg["env"]["random_params"]["gravity"]["enable"]:
+                self.randomize_gravity()
 
         if self.drag_ball:
             if self.step_counter % self.drag_ball_rand_length == 0:
@@ -1420,6 +1435,14 @@ class Go1Dribbler(VecTask):
         self.ball_near_feets = (
             torch.norm(self.foot_positions - self.ball_pos.unsqueeze(1), dim=2) < 0.2
         )  # ball radius is 0.1
+
+        # print("feet in body frame:")
+
+        # print(
+        #     quat_rotate_inverse(
+        #         self.base_quat, self.foot_positions[:, 0, :] - self.base_pos
+        #     )
+        # )
 
         # print("=== ball near feet:", self.ball_near_feets)
 
@@ -1660,6 +1683,8 @@ class Go1Dribbler(VecTask):
                 priv_list.append(base_lin_vel)
             if "base_ang_vel" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(base_ang_vel)
+            if "base_height" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(base_pose[:, 2:3])
 
             if "ball_states_p_0" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.ball_p_buffer[0])
@@ -1713,6 +1738,9 @@ class Go1Dribbler(VecTask):
 
             if "ball_restitution" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.ball_restitution_rand_params)
+
+            if "gravity_offset" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(self.gravity_offset_rand_params)
 
             if "ball_drag" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.ball_drag_rand_params)
@@ -2254,3 +2282,39 @@ class Go1Dribbler(VecTask):
                     * self.dof_damping_rand_params[i, s].item()
                 )
             self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
+
+    def randomize_gravity(self):
+        print("=== randomize gravity of the environment")
+        prop = self.gym.get_sim_params(self.sim)
+        gravity = [0.0, 0.0, -9.8]
+        gravity[0] = (
+            self.cfg["env"]["random_params"]["gravity"]["range_low"]
+            + (
+                self.cfg["env"]["random_params"]["gravity"]["range_high"]
+                - self.cfg["env"]["random_params"]["gravity"]["range_low"]
+            )
+            * torch.rand(1).item()
+        )
+        gravity[1] = (
+            self.cfg["env"]["random_params"]["gravity"]["range_low"]
+            + (
+                self.cfg["env"]["random_params"]["gravity"]["range_high"]
+                - self.cfg["env"]["random_params"]["gravity"]["range_low"]
+            )
+            * torch.rand(1).item()
+        )
+        gravity[2] += (
+            self.cfg["env"]["random_params"]["gravity"]["range_low"]
+            + (
+                self.cfg["env"]["random_params"]["gravity"]["range_high"]
+                - self.cfg["env"]["random_params"]["gravity"]["range_low"]
+            )
+            * torch.rand(1).item()
+        )
+        prop.gravity = gymapi.Vec3(*gravity)
+        self.gym.set_sim_params(self.sim, prop)  # save for sim
+        self.gravity_vec[:, :] = torch.tensor(gravity, device=self.device)
+        self.gravity_offset_rand_params = self.gravity_vec[:, :] - torch.tensor(
+            [0.0, 0.0, -9.8], device=self.device
+        )
+        # save for monitor

@@ -1,0 +1,42 @@
+program: train.py
+name: "pid_gaussian_mu1"
+method: bayes
+metric:
+  goal: maximize
+  name: episode_cumulative/dribbling_ball_vel
+parameters:
+  task:
+    values:
+      - "Go1Dribble"
+  train:
+    values:
+      - "Go1DribblePPOsea"
+  wandb_activate:
+    values:
+      - "true"
+  max_iterations:
+    values:
+      - "1e4"
+  wandb_project:
+    values:
+      - "dribblebot"
+  task.env.rewards.rewardParams.raibert_heuristic_PID.k1:
+    distribution: normal
+    mu: 1.0
+    sigma: 0.5
+  task.env.rewards.rewardParams.raibert_heuristic_PID.k2:
+    distribution: normal
+    mu: 4.0
+    sigma: 0.5
+  task.env.rewards.rewardParams.raibert_heuristic_PID.k3:
+    distribution: normal
+    mu: 0.5
+    sigma: 0.5
+
+
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args_no_hyphens}

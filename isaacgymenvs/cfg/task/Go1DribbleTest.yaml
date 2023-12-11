@@ -4,19 +4,26 @@ name: Go1DribbleTest
 physics_engine: ${..physics_engine}
 
 env:
-  numEnvs: ${resolve_default:10,${...num_envs}}
-  envSpacing: 2. # [m]
+  numEnvs: ${resolve_default:100,${...num_envs}}
+  envSpacing: 1. # [m]
 
   wandb_extra_log: false
   wandb_extra_log_period: 8000
 
+  log_ate: true
+  log_file_name: "./box_plot_data.csv"
+  log_env_name: "mid"
+  log_pt_name: "pid"
+  log_length: ${resolve_default:40,${...max_iterations}} 
+  # 1 iter = 24 steps = 0.48s
+
   cameraSensorPlt: false
 
   obs_history: true
-  history_length: 15
+  history_length: 25
 
   action_lag_step: 1
-  vision_lag_step: 0 # 100ms - 133ms
+  vision_lag_step: 2 # 100ms - 133ms
 
   gait_condition:
     # trotting [0.5,0,0] pacing [0,0,0.5]
@@ -72,6 +79,12 @@ env:
     ball_states_v_0: 3 
     ball_states_p_0: 3
 
+    ball_states_v_1: 3 
+    ball_states_p_1: 3
+
+    ball_states_v_2: 3
+    ball_states_p_2: 3
+
     # ball_states_v_3: 3 
     # ball_states_p_3: 3
 
@@ -121,7 +134,7 @@ env:
       range_high: 0.55
     friction:
       enable: true
-      range_low: 0.1
+      range_low: 1.0
       range_high: 1.5
     restitution:
       enable: true
@@ -150,8 +163,8 @@ env:
       range_high: 1.0
     ball_drag:
       enable: true
-      range_low: 0.0
-      range_high: 0.2 # 0.5
+      range_low: 0.1
+      range_high: 0.3 # 0.5
       interval_s: 19
     ball_reset:
       enable: false
@@ -168,7 +181,7 @@ env:
     ball_speed_max: 3.0
 
   terrain:
-    type: 'trimesh' #plane trimesh
+    type: 'plane' #plane trimesh
     staticFriction: 1.0  # [-]
     dynamicFriction: 1.0  # [-]
     restitution: 0.        # [-]

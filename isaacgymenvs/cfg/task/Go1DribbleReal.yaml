@@ -116,7 +116,7 @@ env:
 
   learn:
     # normalization
-    linearVelocityScale: 0.5
+    linearVelocityScale: 0.9
     angularVelocityScale: 0.25
     dofPositionScale: 1.0
     dofVelocityScale: 0.05

@@ -151,6 +151,8 @@ class Video:
 
 
 if __name__ == "__main__":
+    receive_head = True
+    receive_body = True
     model = YOLO("./dataset/best_72.pt")
     # Example usage:
     T1 = [
@@ -175,19 +177,22 @@ if __name__ == "__main__":
     Gst.init(None)
     # GObject.threads_init()
 
-    video1 = Video(9200, 3)  # 9200
-    video2 = Video(9209, 1)
+    if receive_head:
+        video1 = Video(9200, 3)  # 9200
+    if receive_body:
+        video2 = Video(9209, 1)
 
     print("Initialising stream...")
     waited = 0
-    while not video1.frame_available():
+    while receive_head and not video1.frame_available():
         waited += 1
         print("\r video1 Frame not available (x{})".format(waited), end="")
         cv2.waitKey(100)
-    while not video2.frame_available():
+    while receive_body and not video2.frame_available():
         waited += 1
         print("\r video2 Frame not available (x{})".format(waited), end="")
         cv2.waitKey(100)
+
     print('\nSuccess!\nStarting streaming - press "q" to quit.')
 
     while True:
@@ -206,7 +211,7 @@ if __name__ == "__main__":
 
         while True:
             # Wait for the next frame to become available
-            if video1.frame_available():
+            if receive_head and video1.frame_available():
                 # Only retrieve and display a frame if it's new
                 frame1 = video1.frame()
                 # Convert fisheye to equirectangular
@@ -223,7 +228,7 @@ if __name__ == "__main__":
                     )
                     frame_num += 1
 
-            if video2.frame_available():
+            if receive_body and video2.frame_available():
                 # Only retrieve and display a frame if it's new
                 frame2 = video2.frame()
                 cv2.imshow("origin-9", frame2)

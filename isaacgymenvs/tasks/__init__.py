@@ -28,6 +28,7 @@
 
 
 from .go1 import Go1
+from .go1_dribble_traj import Go1DribblerTraj
 from .go1_dribble import Go1Dribbler
 from .go1_dribble_test import Go1DribblerTest
 from .go1_ball_shoot import Go1BallShoot
@@ -99,6 +100,7 @@ isaacgym_task_map = {
     "Go1": Go1,
     "Go1Dribble": Go1Dribbler,
     "Go1DribbleTest": Go1DribblerTest,
+    "Go1DribbleTraj": Go1DribblerTraj,
     "Go1Fix": Go1,
     "Go1WallKicker": Go1WallKicker,
     "Go1BallShoot": Go1BallShoot,
@@ -126,6 +128,7 @@ isaacgym_task_map = {
     "ShadowHand": ShadowHand,
     "Trifinger": Trifinger,
 }
+
 
 try:
     from .go1_ball_real import BallReal
