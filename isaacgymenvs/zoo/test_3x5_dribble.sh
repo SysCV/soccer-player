@@ -7,13 +7,13 @@ env_array=(
     "task.env.terrain.type='trimesh'")
 
 pt_name=(
-    # "baseline" 
+    "baseline" 
 "context" 
 "PID")
 pt_array=(
-    # "~task.env.priviledgeStates.dof_stiff ~task.env.priviledgeStates.dof_damp ~task.env.priviledgeStates.dof_calib ~task.env.priviledgeStates.payload ~task.env.priviledgeStates.com ~task.env.priviledgeStates.friction ~task.env.priviledgeStates.restitution ~task.env.priviledgeStates.ball_restitution ~task.env.priviledgeStates.ball_mass ~task.env.priviledgeStates.ball_states_v_1 ~task.env.priviledgeStates.ball_states_p_1 ~task.env.priviledgeStates.ball_states_v_2 ~task.env.priviledgeStates.ball_states_p_2 checkpoint='./checkpoints/dribble-baseline-17.pth'" 
-    "checkpoint='./checkpoints/dribble-context-17.pth'" 
-    "checkpoint='./checkpoints/dribble-PID-17.pth'"
+    "~task.env.priviledgeStates.dof_stiff ~task.env.priviledgeStates.dof_damp ~task.env.priviledgeStates.dof_calib ~task.env.priviledgeStates.payload ~task.env.priviledgeStates.com ~task.env.priviledgeStates.friction ~task.env.priviledgeStates.restitution ~task.env.priviledgeStates.ball_restitution ~task.env.priviledgeStates.ball_mass ~task.env.priviledgeStates.ball_states_v_1 ~task.env.priviledgeStates.ball_states_p_1 ~task.env.priviledgeStates.ball_states_v_2 ~task.env.priviledgeStates.ball_states_p_2 checkpoint='./checkpoints/dribble-baseline-106.pth'" 
+    "checkpoint='./checkpoints/dribble-context-106.pth'" 
+    "checkpoint='./checkpoints/dribble-PID-106.pth'"
 )
 
 # Get the length of the array

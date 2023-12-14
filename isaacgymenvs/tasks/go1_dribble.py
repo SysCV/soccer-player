@@ -639,6 +639,7 @@ class Go1Dribbler(VecTask):
         ).repeat(
             (self.num_envs, 1)
         )  # TODO: here actually make gravity not a unit vector
+        self.gravity_vec /= 9.81
         self.gravity_offset_rand_params = torch.zeros_like(
             self.gravity_vec, device=self.device
         )
@@ -2314,7 +2315,9 @@ class Go1Dribbler(VecTask):
         prop.gravity = gymapi.Vec3(*gravity)
         self.gym.set_sim_params(self.sim, prop)  # save for sim
         self.gravity_vec[:, :] = torch.tensor(gravity, device=self.device)
+
         self.gravity_offset_rand_params = self.gravity_vec[:, :] - torch.tensor(
             [0.0, 0.0, -9.8], device=self.device
         )
+        self.gravity_vec /= 9.81
         # save for monitor

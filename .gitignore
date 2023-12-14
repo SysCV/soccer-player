@@ -34,3 +34,5 @@ outputs/
 /isaacgymenvs/offline_data
 isaacgymenvs/dataset/*
 isaacgymenvs/saved_frames
+isaacgymenvs/fisheye_calib
+isaacgymenvs/fisheye_calib_2

@@ -151,9 +151,10 @@ class Video:
 
 
 if __name__ == "__main__":
-    receive_head = True
+    receive_head = False
     receive_body = True
-    model = YOLO("./dataset/best_72.pt")
+    dir_name = "./fisheye_calib_2/"
+    model = YOLO("./dataset/best_72.pt")  # for blue ball, is 99
     # Example usage:
     T1 = [
         [0.0, 0.0, 1.0, 0.2911],
@@ -202,8 +203,8 @@ if __name__ == "__main__":
         import os
 
         # Create a directory to save the frames
-        if not os.path.exists("./saved_frames_blue"):
-            os.makedirs("./saved_frames_blue")
+        if not os.path.exists(dir_name):
+            os.makedirs(dir_name)
 
         # Initialize a counter to keep track of the frame number
         frame_num = 0
@@ -223,7 +224,7 @@ if __name__ == "__main__":
                 if save_frames:
                     print("saving...", frame_num)
                     cv2.imwrite(
-                        "./saved_frames/frame{}.jpg".format(frame_num),
+                        dir_name + "frame{}.jpg".format(frame_num),
                         frame1,
                     )
                     frame_num += 1
@@ -239,7 +240,7 @@ if __name__ == "__main__":
                 if save_frames:
                     print("saving...", frame_num)
                     cv2.imwrite(
-                        "./saved_frames/frame{}.jpg".format(frame_num),
+                        dir_name + "frame{}.jpg".format(frame_num),
                         frame2,
                     )
                     frame_num += 1

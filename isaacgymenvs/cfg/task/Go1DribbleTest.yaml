@@ -75,6 +75,7 @@ env:
   priviledgeStates:
     base_lin_vel: 3
     base_ang_vel: 3
+    base_height: 1
 
     ball_states_v_0: 3 
     ball_states_p_0: 3

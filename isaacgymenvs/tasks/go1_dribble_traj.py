@@ -1696,6 +1696,9 @@ class Go1DribblerTraj(VecTask):
             if "base_ang_vel" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(base_ang_vel)
 
+            if "base_height" in self.cfg["env"]["priviledgeStates"]:
+                priv_list.append(base_pose[:, 2:3])
+
             if "ball_states_p_0" in self.cfg["env"]["priviledgeStates"]:
                 priv_list.append(self.ball_p_buffer[0])
             if "ball_states_v_0" in self.cfg["env"]["priviledgeStates"]:

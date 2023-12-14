@@ -1,6 +1,4 @@
 params:
-
-  
   seed: ${...seed}
 
   algo:
@@ -88,3 +86,4 @@ params:
 
     player:
       games_num: 50000
+      # need_estimator_data: True
