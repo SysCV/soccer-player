@@ -1796,10 +1796,13 @@ class Go1DribblerTest(VecTask):
                     df.to_csv(file_name, index=False)
 
                 # compute ATE
-                ate = torch.norm(
-                    self.command_squence[0 : self.plot_step]
-                    - self.velocity_squence[0 : self.plot_step],
-                    dim=2,
+                ate = torch.mean(
+                    torch.norm(
+                        self.command_squence[0 : self.plot_step]
+                        - self.velocity_squence[0 : self.plot_step],
+                        dim=2,
+                    ),
+                    dim=0,
                 )
 
                 self.plot_step = 0
@@ -2360,8 +2363,8 @@ from isaacgym.terrain_utils import *
 
 class Terrain:
     def __init__(self, cfg, num_robots) -> None:
-        self.horizontal_scale = 0.2
-        self.vertical_scale = 0.0000005
+        self.horizontal_scale = 0.2  # should be 0.2
+        self.vertical_scale = 0.0000005  # should be 0.0000005
         self.border_size = 1
         self.num_per_env = 2
         self.env_length = cfg["mapLength"]

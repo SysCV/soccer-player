@@ -28,13 +28,16 @@ df_melted["custom_value"] = custom_scale(df_melted["value"])
 
 # Creating the boxplot
 plt.figure(figsize=(12, 8))
-sns.boxplot(
-    x="env_name", y="custom_value", hue="pt_name", whis=[0, 100], data=df_melted
-)
+# sns.boxplot(
+#     x="env_name", y="custom_value", hue="pt_name", whis=[0, 100], data=df_melted
+# )
+
+sns.boxplot(x="env_name", y="value", hue="pt_name", whis=[0, 100], data=df_melted)
 
 yticks = plt.yticks()[0]
 # make yticks starts at -0.5
-plt.yticks(ticks=yticks, labels=inverse_custom_scale(yticks).round(2))
+# plt.yticks(ticks=yticks, labels=inverse_custom_scale(yticks).round(2))
+plt.yticks(ticks=yticks, labels=yticks.round(2))
 plt.title("Boxplot of Statistics by Environment and PT Name")
 plt.xlabel("Environment Name")
 plt.ylabel("Value")
