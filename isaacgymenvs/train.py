@@ -110,12 +110,6 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning import amp_models
     from isaacgymenvs.learning import amp_network_builder
 
-    from isaacgymenvs.learning.handwrite_pixel import handwrite_network_builder
-    from isaacgymenvs.learning.handwrite_pixel import handwirte_agent
-    from isaacgymenvs.learning.handwrite_pixel import handwrite_player
-
-    from isaacgymenvs.learning.history import history_network_builder
-
     from isaacgymenvs.learning.baseline import state_network_builder
 
     #     from isaacgymenvs.learning.baseline import state_player
@@ -128,15 +122,6 @@ def launch_rlg_hydra(cfg: DictConfig):
     from isaacgymenvs.learning.sea import sea_models
     from isaacgymenvs.learning.sea import sea_network_builder
     from isaacgymenvs.learning.sea import sea_player as sea_player
-
-    from isaacgymenvs.learning.rma import rma_agent
-    from isaacgymenvs.learning.rma import rma_models
-    from isaacgymenvs.learning.rma import rma_network_builder
-
-    from isaacgymenvs.learning.waq import waq_agent
-    from isaacgymenvs.learning.waq import waq_models
-    from isaacgymenvs.learning.waq import waq_network_builder
-    from isaacgymenvs.learning.waq import waq_player as waq_player
 
     # _eval
 
@@ -261,27 +246,14 @@ def launch_rlg_hydra(cfg: DictConfig):
             "base_ac", lambda **kwargs: state_agent.A2CAgent(**kwargs)
         )
         runner.algo_factory.register_builder(
-            "pixel_ac", lambda **kwargs: handwirte_agent.A2CPixelAgent(**kwargs)
-        )
-        runner.algo_factory.register_builder(
             "common_ac", lambda **kwargs: common_agent.CommonAgent(**kwargs)
         )
         runner.algo_factory.register_builder(
             "sea_ac", lambda **kwargs: sea_agent.A2CAgent(**kwargs)
         )
-        runner.algo_factory.register_builder(
-            "rma_ac", lambda **kwargs: rma_agent.A2CAgent(**kwargs)
-        )
-        runner.algo_factory.register_builder(
-            "waq_ac", lambda **kwargs: waq_agent.A2CAgent(**kwargs)
-        )
 
         runner.player_factory.register_builder(
             "amp_continuous", lambda **kwargs: amp_players.AMPPlayerContinuous(**kwargs)
-        )
-        runner.player_factory.register_builder(
-            "pixel_ac",
-            lambda **kwargs: handwrite_player.PpoPixelPlayerContinuous(**kwargs),
         )
         runner.player_factory.register_builder(
             "common_ac", lambda **kwargs: common_player.CommonPlayer(**kwargs)
@@ -290,9 +262,6 @@ def launch_rlg_hydra(cfg: DictConfig):
         # runner.player_factory.register_builder('real_ac', lambda **kwargs : state_player.Player(**kwargs))
         runner.player_factory.register_builder(
             "base_ac", lambda **kwargs: state_player.Player(**kwargs)
-        )
-        runner.player_factory.register_builder(
-            "waq_ac", lambda **kwargs: waq_player.Player(**kwargs)
         )
         runner.player_factory.register_builder(
             "sea_ac", lambda **kwargs: sea_player.Player(**kwargs)
@@ -306,24 +275,9 @@ def launch_rlg_hydra(cfg: DictConfig):
             "continuous_sea",
             lambda network, **kwargs: sea_models.ModelSEAContinuous(network),
         )
-        model_builder.register_model(
-            "continuous_rma", lambda network, **kwargs: rma_models.ModelRMA(network)
-        )
-        model_builder.register_model(
-            "continuous_waq",
-            lambda network, **kwargs: waq_models.ModelContinuous(network),
-        )
 
         model_builder.register_network(
             "amp", lambda **kwargs: amp_network_builder.AMPBuilder()
-        )
-        model_builder.register_network(
-            "actor_critic_pixel",
-            lambda **kwargs: handwrite_network_builder.PixelA2CBuilder(),
-        )
-        model_builder.register_network(
-            "actor_critic_history",
-            lambda **kwargs: history_network_builder.HisA2CBuilder(),
         )
         model_builder.register_network(
             "actor_critic_state", lambda **kwargs: state_network_builder.A2CBuilder()
@@ -331,13 +285,6 @@ def launch_rlg_hydra(cfg: DictConfig):
         model_builder.register_network(
             "actor_critic_sea", lambda **kwargs: sea_network_builder.A2CBuilder()
         )
-        model_builder.register_network(
-            "actor_critic_rma", lambda **kwargs: rma_network_builder.A2CBuilder()
-        )
-        model_builder.register_network(
-            "actor_critic_waq", lambda **kwargs: waq_network_builder.A2CBuilder()
-        )
-
         return runner
 
     # convert CLI arguments into dictionary

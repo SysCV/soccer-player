@@ -1,1 +1,0 @@
-python train.py task=Go1DribbleReal train=Go1DribblePPOsea test=true checkpoint="/home/gymuser/IsaacGymEnvs-main/isaacgymenvs/runs/dribble-PID-lag2-PID_09-18-42-49/nn/dribble-PID-lag2-PID.pth"

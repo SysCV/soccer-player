@@ -99,7 +99,6 @@ from isaacgym.torch_utils import *
 from isaacgym import gymutil
 
 from isaacgymenvs.tasks.base.vec_task import VecTask
-import isaacgymenvs.tasks.go1func.quadric_utils as quadric_utils
 
 from isaacgymenvs.tasks.curricula.curriculum_torch import RewardThresholdCurriculum
 

@@ -52,7 +52,7 @@ wandb_logcode_dir: ''
 capture_video: False
 capture_video_freq: 20000 # 50Hz, so 20000 = 400s 
 capture_video_len: 150
-force_render: False
+force_render: True
 
 # disables rendering
 headless: False
