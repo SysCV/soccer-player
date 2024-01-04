@@ -62,7 +62,7 @@ def plot_trajectory(trajectory_data):
 
 
 # File path and details
-file_path = "./traj_plot_data.yaml"
+file_path = "./script/traj_plot_data.yaml"
 env_names = ["zero", "mid"]
 pt_names = ["baseline", "PID"]
 colors = ["orange", "blue"]

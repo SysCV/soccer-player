@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Given data, from csv file
-data = pd.read_csv("./box_plot_data.csv")
+data = pd.read_csv("./script/box_plot_data.csv")
 
 # Convert to DataFrame
 df = pd.DataFrame(data)
@@ -38,7 +38,7 @@ yticks = plt.yticks()[0]
 # make yticks starts at -0.5
 # plt.yticks(ticks=yticks, labels=inverse_custom_scale(yticks).round(2))
 plt.yticks(ticks=yticks, labels=yticks.round(2))
-plt.title("Boxplot of Statistics by Environment and PT Name")
+plt.title("Boxplot of Statistics of Environment and Policy Name")
 plt.xlabel("Environment Name")
 plt.ylabel("Value")
 # make axis only x and y
