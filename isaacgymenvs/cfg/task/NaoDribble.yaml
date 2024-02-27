@@ -1,0 +1,338 @@
+# used to create the object
+name: NaoDribble
+
+physics_engine: ${..physics_engine}
+
+env:
+  numEnvs: ${resolve_default:8000,${...num_envs}}
+  envSpacing: 2. # [m]
+
+  wandb_extra_log: false
+  wandb_extra_log_period: 8000
+
+  cameraSensorPlt: false
+
+  obs_history: true
+  history_length: 25
+
+  action_lag_step: 0
+  vision_lag_step: 0 # 100ms - 133ms
+  pid_delta: true
+
+  gait_condition:
+    # trotting [0.5,0,0] pacing [0,0,0.5]
+    phases: 0.0
+    offsets: 0.5
+    bounds: 0.0
+    kappa: 0.07
+    frequency: 2.0
+    duration: 0.5
+
+  vision_receive_prob: 1.0
+
+  state_observations:
+    projected_gravity: 3
+    dof_pos: 10
+    dof_vel: 10
+    last_actions: 10
+    gait_sin_indict: 2
+
+    body_yaw: 1
+
+    ball_states_p: 3
+    command: 2
+
+  add_noise: false
+  obs_noise:
+    projected_gravity: 0.05
+    dof_pos: 0.01
+    dof_vel: 0.1
+    last_actions: 0
+    gait_sin_indict: 0
+    body_yaw: 0.03
+    ball_states_p: 0.05
+    command: 0
+
+  pixel_observations:
+    enable: false
+    height: 360
+    width: 360
+    cam_range: 110
+    history: 1
+    head_cam_pose: [0.3, 0.0, 0.0]
+    cam_heading_rad: 0.0
+    # bot_cam_pose: [0.25, 0.0, -0.1]
+
+  obs_privilege: true
+  empty_privilege: false
+
+  priviledgeStates:
+    base_lin_vel: 3
+    base_ang_vel: 3
+    base_height: 1
+
+    ball_states_v_0: 3 
+    ball_states_p_0: 3
+
+    # ball_states_v_1: 3 
+    # ball_states_p_1: 3
+
+    # ball_states_v_2: 3
+    # ball_states_p_2: 3
+
+    # ball_states_v_3: 3 
+    # ball_states_p_3: 3
+
+    # ball_states_v_6: 3
+    # ball_states_p_6: 3
+
+    dof_stiff: 10
+    dof_damp: 10
+    dof_calib: 10
+    payload: 1
+    com: 3 
+    # friction: 4
+    # restitution: 4
+    ball_mass: 1
+    ball_restitution: 1
+    # gravity_offset: 3
+
+
+    ball_drag: 1
+
+    # total: 12
+
+  actions_num: 10
+
+  randomCommandVelocityRanges:
+    linear_x: [-1.0, 1.0] # min max [m/s]
+    linear_x_init: [-1.0, 1.0] # [-0.3, 0.3] # min max [m/s]
+    num_bins_x: 1 # 20
+
+    linear_y: [-1.0, 1.0] # min max [m/s]
+    linear_y_init: [-1.0, 1.0] # [-0.3, 0.3] # min max [m/s]
+    num_bins_y: 1 # 20
+
+  clipObservations: 5.0
+  clipActions: 1.0
+
+  random_params:
+    dof_calib:
+      enable: true
+      range_low: -0.00
+      range_high: 0.00
+    stiffness:
+      enable: true
+      range_low: 15.
+      range_high: 16.
+    damping:
+      enable: true
+      range_low: 0.5
+      range_high: 0.5
+    friction:
+      enable: false
+      range_low: 2.0
+      range_high: 2.0
+    restitution:
+      enable: false
+      range_low: 0.2
+      range_high: 0.2
+    com:
+      enable: true
+      range_low: 0.0
+      range_high: 0.0
+      x_offset: 0.00
+    payload:
+      enable: true
+      range_low: -0.0
+      range_high: 0.0
+    push:
+      enable: false
+      interval_s: 7
+      max_vel: 0.5
+    ball_mass:
+      enable: true
+      range_low: 0.05
+      range_high: 0.05
+    ball_restitution:
+      enable: true
+      range_low: 0.5
+      range_high: 1.5
+    ball_drag:
+      enable: true
+      range_low:  -0.01
+      range_high: 0.5 # 0.5
+      interval_s: 19
+    ball_reset:
+      enable: false
+      vel: 0.3
+      prob_vel: 2e-4
+      pos: 1.0
+      prob_pos: 1e-4
+    gravity:
+      enable: false
+      range_low: -0.8
+      range_high: 0.8
+      interval_s: 9
+
+  randomization: true
+  randomization_freq: 10000 # 1s = 50 steps
+
+  terminateCondition:
+    robot_ball_max: 1.5
+    ball_speed_max: 1.5
+
+  terrain:
+    type: 'plane' #plane trimesh
+    
+  plane:
+    staticFriction: 0.5 # [-]
+    dynamicFriction: 0.0 # [-]
+    restitution: 0.01 # [-]
+
+  baseInitState:
+    pos: [0.0, 0.0, 0.4] # x,y,z [m]
+    rot: [0.00, 0.0, 0.0, 1.0] # x,y,z,w [quat]
+    vLinear: [0.0, 0.0, 0.0] # x,y,z [m/s]
+    vAngular: [0.0, 0.0, 0.0] # x,y,z [rad/s]
+
+  ballInitState:
+    pos: [0.0, 0.0, 0.1] # x,y,z [m]
+    randomPosRange: [1.0, 1.0, 0.0]
+    # ballInitSpeed: -1.0 # [m/s]
+    mass: 0.1 # [kg]
+
+  control:
+    # PD Drive parameters:
+    stiffness: 15.0 # [N*m/rad]
+    damping: 0.5 # [N*m*s/rad]
+    actionScale: 0.5
+    hipAddtionalScale: 0.5
+    controlFrequencyInv: 1 # 60 Hz
+    # todo: change to a1 param?
+
+  defaultJointAngles: # = target angles when action = 0.0
+    LHipRoll: 0.1
+    LHipPitch: 0.0
+    LKneePitch: 0.0
+    LAnklePitch: 0.0
+    LAnkleRoll: 0.0
+    RHipRoll: -0.1
+    RHipPitch: 0.0
+    RKneePitch: 0.0
+    RAnklePitch: 0.0
+    RAnkleRoll: 0.0
+
+  rewards:
+    only_positive_rewards_ji22_style: True
+    sigma_rew_neg: 0.02 # is important!!
+
+    rewardScales:
+      collision: -5.0
+      orientation: -5.0
+      lin_vel_z: -0.02
+      torque: -0.0001
+      dof_pos: -0.05
+      dof_acc: -2.5e-7
+      dof_vel: -0.0001
+      action_rate: -0.01 # when have lag, it will be different with smoothness
+      action_smoothness_1: -0.1
+      action_smoothness_2: -0.1
+
+      # base_height: -0.001
+
+      # walk this way, this replace the feet air time
+      tracking_contacts_shaped_force: 4.0
+      tracking_contacts_shaped_vel: 4.0
+
+      # raibert_heuristic_self: -10.0
+      raibert_heuristic_PID: -10.0
+      # feet_clearance: -30.0
+      tracking_lin_vel_PID: 2.0 # make sure it is after raibert_heuristic_PID
+
+      # dribbling ball
+      dribbling_robot_ball_vel: 0.5
+      dribbling_robot_ball_pos: 4.0
+      dribbling_ball_vel: 4.0
+      dribbling_robot_ball_yaw: 4.0
+      dribbling_ball_vel_norm: 4.0
+      dribbling_ball_vel_angle: 4.0
+
+    rewardParams:
+      tracking_contacts_shaped_force:
+        sigma: 100.
+      tracking_contacts_shaped_vel:
+        sigma: 10.
+      dribbling_ball_vel:
+        sigma: 0.25
+      raibert_heuristic_PID:
+        k1: 1.0
+        k2: 4.0
+        k3: 0.5
+      feet_clearance:
+        height: 0.04
+      tracking_lin_vel_PID:
+        sigma: 0.25
+
+  # for a1
+
+  urdfAsset:
+    collapseFixedJoints: True
+    fixBaseLink: False
+    defaultDofDriveMode: 4 # see GymDofDriveModeFlags (0 is none, 1 is pos tgt, 2 is vel tgt, 4 effort)
+
+  learn:
+    # normalization
+    linearVelocityScale: 1.0
+    angularVelocityScale: 0.25
+    dofPositionScale: 1.0
+    dofVelocityScale: 0.05
+
+    # episode length in seconds
+    episodeLength_s: 40
+
+    curriculum:
+      resample_s: 10
+      success_threshold:
+        dribbling_ball_vel: 0.8
+        tracking_contacts_shaped_force: 0.9
+        tracking_contacts_shaped_vel: 0.9
+      local_range: [0.4, 0.4]
+
+  # viewer cam:
+  viewer:
+    refEnv: 0
+    pos: [0, 0, 4] # [m]
+    lookat: [1., 1, 3.3] # [m]
+
+  # set to True if you use camera sensors in the environment
+  enableCameraSensors: False
+
+sim:
+  dt: 0.02
+  substeps: 2
+  up_axis: "z"
+  use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
+  gravity: [0.0, 0.0, -9.81]
+  physx:
+    num_threads: ${....num_threads}
+    solver_type: ${....solver_type}
+    use_gpu: ${contains:"cuda",${....sim_device}} # set to False to run on CPU
+    num_position_iterations: 4
+    num_velocity_iterations: 1
+    contact_offset: 0.02
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.1
+    max_depenetration_velocity: 100.0
+    default_buffer_size_multiplier: 5.0
+    max_gpu_contact_pairs: 8388608 # 8*1024*1024
+    num_subscenes: ${....num_subscenes}
+    contact_collection: 1 # 0: CC_NEVER (don't collect contact info), 1: CC_LAST_SUBSTEP (collect only contacts on last substep), 2: CC_ALL_SUBSTEPS (broken - do not use!)
+
+task:
+  target_ball: True
+  target_goal: True
+  have_wall: False
+  actor_per_environment: 4
+  randomize: False
+  randomization_params: []

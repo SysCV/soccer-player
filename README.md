@@ -2,11 +2,10 @@
 
 This repository provides an implementation of the paper:
 
-**DexDribbler: Dynamic Legged Manipulation**
+**DexDribbler: Leaning Dexterous Soccer Manipulation via Dynamic
+Supervision**
 
-xxxxxxxxxxxxxxxx
-
-xxx| xxx| xxx
+[Paper]|[Website]|[Video]|
 
 Our work is greatly influenced by [DribbleBot](https://github.com/Improbable-AI/dribblebot) and built upon [IsaacGymEnvs](https://github.com/NVIDIA-Omniverse/IsaacGymEnvs).
 
@@ -96,6 +95,24 @@ python train.py task=Go1Dribble train=Go1DribblePPOsea seed=42 ~task.env.rewards
 ### Reproducibility
 
 the random seeds we used in the experiment part of the paper are `[42,3,13,17,69,106]`.
+
+### Dribbling under other leg configuration
+
+![](assets/img/envs.png "envs")
+
+By simply adapting the action dimension and specifying the foot index number, our training pipeline and the original DribbleBot approach are both naturally compatible for ball dribbling tasks across different legged robot configurations.
+
+you can try:
+```
+python train.py task=NaoDribble train=Go1DribblePPOsea
+```
+or
+
+```
+python train.py task=CaDribble train=Go1DribblePPOsea
+```
+
+But they are not verified in real world.
 
 ## Citing
 

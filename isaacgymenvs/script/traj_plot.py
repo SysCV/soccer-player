@@ -22,8 +22,16 @@ def plot_trajectory_comparison(file_path, env_names, pt_names, colors):
 
             bx = trajectory_data["bx"]
             by = trajectory_data["by"]
-            plt.plot(px, py, "-", color=color, label=f"Robot Trajectory {pt}")
-            plt.plot(bx, by, "--", color=color, label=f"Ball Trajectory {pt}")
+            if pt == "baseline":
+                plt.plot(px, py, "-", color=color, label=f"Robot Trajectory {pt}")
+                plt.plot(bx, by, "--", color=color, label=f"Ball Trajectory {pt}")
+            else:
+                plt.plot(
+                    px, py, "-", color=color, label=f"Robot Trajectory {pt} guidance"
+                )
+                plt.plot(
+                    bx, by, "--", color=color, label=f"Ball Trajectory {pt} guidance"
+                )
 
         plt.title(f"Trajectory Comparison in {env} Environment")
         plt.xlabel("Position X (m)")

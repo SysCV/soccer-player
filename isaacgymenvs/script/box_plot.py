@@ -46,5 +46,7 @@ plt.gca().spines["right"].set_visible(False)
 plt.gca().spines["top"].set_visible(False)
 # add horizontal grid lines, dotted
 plt.gca().yaxis.grid(True, linestyle="--")
-plt.legend(title="PT Name")
+handles, labels = plt.gca().get_legend_handles_labels()
+new_labels = ["Baseline", "Context", "PID guidance"]
+plt.legend(handles, new_labels)
 plt.show()

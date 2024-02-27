@@ -30,6 +30,8 @@
 from .go1_dribble_traj import Go1DribblerTraj
 from .go1_dribble import Go1Dribbler
 from .go1_dribble_test import Go1DribblerTest
+from .cassie_dribble import CaDribbler
+from .nao_dribble import NaoDribbler
 from .ant import Ant
 
 
@@ -38,6 +40,8 @@ isaacgym_task_map = {
     "Go1Dribble": Go1Dribbler,
     "Go1DribbleTest": Go1DribblerTest,
     "Go1DribbleTraj": Go1DribblerTraj,
+    "NaoDribble": NaoDribbler,
+    "CaDribble": CaDribbler,
     "Ant": Ant,
 }
 
