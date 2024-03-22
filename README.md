@@ -2,12 +2,12 @@
 
 This repository provides an implementation of the paper:
 
-**DexDribbler: Leaning Dexterous Soccer Manipulation via Dynamic
+**DexDribbler: Learning Dexterous Soccer Manipulation via Dynamic
 Supervision**
 
-[Paper]|[Website]|[Video]|
+[[Paper]](https://arxiv.org/abs/2403.14300)|[Website]|[Video]|
 
-Our work is greatly influenced by [DribbleBot](https://github.com/Improbable-AI/dribblebot) and built upon [IsaacGymEnvs](https://github.com/NVIDIA-Omniverse/IsaacGymEnvs).
+Our work is greatly inspired by [DribbleBot](https://github.com/Improbable-AI/dribblebot) and built upon [IsaacGymEnvs](https://github.com/NVIDIA-Omniverse/IsaacGymEnvs).
 
 
 ## Installation
@@ -119,10 +119,12 @@ But they are not verified in real world.
 Please cite this work as:
 
 ```
-@misc{makoviychuk2021isaac,
-      title={Isaac Gym: High Performance GPU-Based Physics Simulation For Robot Learning}, 
-      author={Viktor Makoviychuk and Lukasz Wawrzyniak and Yunrong Guo and Michelle Lu and Kier Storey and Miles Macklin and David Hoeller and Nikita Rudin and Arthur Allshire and Ankur Handa and Gavriel State},
-      year={2021},
-      journal={arXiv preprint arXiv:2108.10470}
+@misc{hu2024dexdribbler,
+      title={DexDribbler: Learning Dexterous Soccer Manipulation via Dynamic Supervision}, 
+      author={Yutong Hu and Kehan Wen and Fisher Yu},
+      year={2024},
+      eprint={2403.14300},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO}
 }
 ```
