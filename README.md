@@ -5,7 +5,7 @@ This repository provides an implementation of the paper:
 **DexDribbler: Learning Dexterous Soccer Manipulation via Dynamic
 Supervision**
 
-[[Paper]](https://arxiv.org/abs/2403.14300)|[Website]|[Video]|
+[[Paper]](https://arxiv.org/abs/2403.14300)|[[Website]](https://sites.google.com/view/dex-soccer-dribbler/home)
 
 Our work is greatly inspired by [DribbleBot](https://github.com/Improbable-AI/dribblebot) and built upon [IsaacGymEnvs](https://github.com/NVIDIA-Omniverse/IsaacGymEnvs).
 
