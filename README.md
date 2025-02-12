@@ -1,3 +1,5 @@
+![](assets/img/example.jpg "boxplot")
+
 # Dribbling Benchmark Environments
 
 This repository provides an implementation of the paper:
