@@ -121,12 +121,9 @@ But they are not verified in real world.
 Please cite this work as:
 
 ```
-@misc{hu2024dexdribbler,
-      title={DexDribbler: Learning Dexterous Soccer Manipulation via Dynamic Supervision}, 
-      author={Yutong Hu and Kehan Wen and Fisher Yu},
-      year={2024},
-      eprint={2403.14300},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO}
-}
+@INPROCEEDINGS{10802022,
+  author={Hu, Yutong and Wen, Kehan and Yu, Fisher},
+  booktitle={2024 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)}, 
+  title={DexDribbler: Learning Dexterous Soccer Manipulation via Dynamic Supervision}, 
+  year={2024},
 ```
